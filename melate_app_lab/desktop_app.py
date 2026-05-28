@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 from typing import Callable
 
 from . import desktop_controller as controller
+from .memory import DEFAULT_DB_PATH
 from .theme import APP_QSS
-from .worker import run_task_sync
+from .worker import QtTaskRunner, run_task_sync
 
 
 DEFAULT_RESULT = "2 18 22 38 51 52"
@@ -25,6 +27,7 @@ def launch_desktop() -> int:
         from PySide6.QtCore import Qt
         from PySide6.QtWidgets import (
             QApplication,
+            QFileDialog,
             QFrame,
             QGridLayout,
             QHBoxLayout,
@@ -77,6 +80,8 @@ def launch_desktop() -> int:
     progress = QProgressBar()
     progress.setRange(0, 1)
     progress.setValue(0)
+    qt_runner = QtTaskRunner()
+    last_html_report: dict[str, str | None] = {"path": None}
 
     form = QGridLayout()
     form.addWidget(QLabel("Sorteo"), 0, 0)
@@ -101,18 +106,11 @@ def launch_desktop() -> int:
     def log(message: str) -> None:
         console.appendPlainText(message)
 
-    def run_action(name: str, fn: Callable[[], object]) -> None:
-        progress.setRange(0, 0)
-        log(f"Ejecutando {name}...")
-        worker_result = run_task_sync(fn, log=log)
-        progress.setRange(0, 1)
-        progress.setValue(1 if worker_result.ok else 0)
-        if not worker_result.ok:
-            QMessageBox.warning(window, "MelateApp", worker_result.error or "Error")
-            return
-        payload = worker_result.result
+    def handle_payload(payload: object) -> None:
         log(json.dumps(payload, ensure_ascii=False, indent=2))
         if isinstance(payload, dict):
+            if payload.get("html_path"):
+                last_html_report["path"] = str(payload["html_path"])
             trace = payload.get("components", {}).get("trace") if isinstance(payload.get("components"), dict) else payload
             postmortem = payload.get("components", {}).get("postmortem") if isinstance(payload.get("components"), dict) else payload
             stress = payload.get("components", {}).get("stress_review") if isinstance(payload.get("components"), dict) else payload
@@ -129,17 +127,65 @@ def launch_desktop() -> int:
                 )
                 metric_labels["Alertas"].setText(f"Alertas\n{len(stress.get('review_alerts_es', []))}")
 
+    def finish_action(ok: bool = True) -> None:
+        progress.setRange(0, 1)
+        progress.setValue(1 if ok else 0)
+
+    def run_action(name: str, fn: Callable[[], object], threaded: bool = False) -> None:
+        progress.setRange(0, 0)
+        log(f"Ejecutando {name}...")
+        if threaded:
+            qt_runner.run(
+                fn,
+                on_log=log,
+                on_result=handle_payload,
+                on_error=lambda message: QMessageBox.warning(window, "MelateApp", message),
+                on_finished=lambda: finish_action(True),
+            )
+            return
+
+        worker_result = run_task_sync(fn, log=log)
+        finish_action(worker_result.ok)
+        if not worker_result.ok:
+            QMessageBox.warning(window, "MelateApp", worker_result.error or "Error")
+            return
+        handle_payload(worker_result.result)
+
+    def open_last_html_report() -> object:
+        path = last_html_report["path"] or str(Path("outputs") / f"postmortem_{int(draw_input.text())}.html")
+        return controller.open_report(path)
+
+    def import_history_dialog() -> object:
+        file_path, _selected_filter = QFileDialog.getOpenFileName(
+            window,
+            "Import History",
+            str(Path("data") / "samples"),
+            "History files (*.csv *.json)",
+        )
+        if not file_path:
+            return {"imported": 0, "message": "Importacion cancelada."}
+        from .historical_store import import_draws_to_memory, load_draw_history
+        from .importers import parse_draw_csv, parse_draw_json
+
+        path = Path(file_path)
+        records = parse_draw_json(path) if path.suffix.lower() == ".json" else parse_draw_csv(path)
+        import_draws_to_memory(records, DEFAULT_DB_PATH)
+        history = load_draw_history(DEFAULT_DB_PATH)
+        return {"imported": len(records), "history_count": len(history), "memory_path": str(DEFAULT_DB_PATH)}
+
     actions = [
-        ("Trace", lambda: controller.run_trace(int(draw_input.text()), result_input.text())),
-        ("Postmortem", lambda: controller.run_postmortem(int(draw_input.text()), result_input.text(), played_input.toPlainText())),
-        ("Stress Review", lambda: controller.run_stress(result_input.text(), played_input.toPlainText())),
-        ("Brain Review", lambda: controller.run_brain(int(draw_input.text()), result_input.text(), played_input.toPlainText())),
-        ("Remember", lambda: controller.run_remember(int(draw_input.text()), result_input.text(), played_input.toPlainText())),
-        ("Generate Report", lambda: controller.run_report(int(draw_input.text()), result_input.text(), played_input.toPlainText())),
+        ("Trace", lambda: controller.run_trace(int(draw_input.text()), result_input.text()), False),
+        ("Postmortem", lambda: controller.run_postmortem(int(draw_input.text()), result_input.text(), played_input.toPlainText()), False),
+        ("Stress Review", lambda: controller.run_stress(result_input.text(), played_input.toPlainText()), True),
+        ("Brain Review", lambda: controller.run_brain(int(draw_input.text()), result_input.text(), played_input.toPlainText()), True),
+        ("Remember", lambda: controller.run_remember(int(draw_input.text()), result_input.text(), played_input.toPlainText()), False),
+        ("Generate Report", lambda: controller.run_report(int(draw_input.text()), result_input.text(), played_input.toPlainText()), False),
+        ("Open HTML Report", open_last_html_report, False),
+        ("Import History", import_history_dialog, True),
     ]
-    for label, fn in actions:
+    for label, fn, threaded in actions:
         button = QPushButton(label)
-        button.clicked.connect(lambda _checked=False, label=label, fn=fn: run_action(label, fn))
+        button.clicked.connect(lambda _checked=False, label=label, fn=fn, threaded=threaded: run_action(label, fn, threaded))
         button_row.addWidget(button)
     analysis_layout.addLayout(button_row)
     analysis_layout.addWidget(progress)

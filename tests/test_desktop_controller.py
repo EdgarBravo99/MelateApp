@@ -31,3 +31,4 @@ def test_run_report_returns_paths(tmp_path, monkeypatch):
 
     assert result["json_path"].endswith("postmortem_4218.json")
     assert result["html_path"].endswith("postmortem_4218.html")
+    assert result["csv_path"].endswith("postmortem_4218.csv")
