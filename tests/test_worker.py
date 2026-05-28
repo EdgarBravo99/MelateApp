@@ -21,6 +21,8 @@ def test_qt_task_runner_has_clear_message_when_missing_pyside(monkeypatch):
 
 
 def test_qt_task_runner_catches_exceptions_and_emits_traceback():
+    import pytest
+    pytest.importorskip("PySide6")
     from PySide6.QtCore import QCoreApplication
     import time
     

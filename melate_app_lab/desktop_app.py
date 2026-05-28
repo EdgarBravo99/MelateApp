@@ -442,43 +442,43 @@ def launch_desktop() -> int:
         try:
             draw, result_text, _ = validate_inputs(require_played=False)
             run_action("Trace", lambda: controller.run_trace(draw, result_text), False)
-        except ValueError as e:
-            log(f"Error de validacion: {e}")
+        except Exception as e:
+            log(f"Error: {e}")
 
     def start_postmortem():
         try:
             draw, result_text, played_text = validate_inputs()
             run_action("Postmortem", lambda: controller.run_postmortem(draw, result_text, played_text), False)
-        except ValueError as e:
-            log(f"Error de validacion: {e}")
+        except Exception as e:
+            log(f"Error: {e}")
 
     def start_stress_review():
         try:
             _, result_text, played_text = validate_inputs(require_draw=False)
             run_action("Stress Review", lambda: controller.run_stress(result_text, played_text), True)
-        except ValueError as e:
-            log(f"Error de validacion: {e}")
+        except Exception as e:
+            log(f"Error: {e}")
 
     def start_brain_review():
         try:
             draw, result_text, played_text = validate_inputs()
             run_action("Brain Review", lambda: controller.run_brain(draw, result_text, played_text), True)
-        except ValueError as e:
-            log(f"Error de validacion: {e}")
+        except Exception as e:
+            log(f"Error: {e}")
 
     def start_remember():
         try:
             draw, result_text, played_text = validate_inputs()
             run_action("Remember", lambda: controller.run_remember(draw, result_text, played_text), False)
-        except ValueError as e:
-            log(f"Error de validacion: {e}")
+        except Exception as e:
+            log(f"Error: {e}")
 
     def start_generate_report():
         try:
             draw, result_text, played_text = validate_inputs()
             run_action("Generate Report", lambda: controller.run_report(draw, result_text, played_text), False)
-        except ValueError as e:
-            log(f"Error de validacion: {e}")
+        except Exception as e:
+            log(f"Error: {e}")
 
     actions_config = [
         ("Trace", start_trace),
