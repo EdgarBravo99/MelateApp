@@ -79,14 +79,16 @@ class QtTaskRunner:
             finished = Signal()
 
             def execute(self) -> None:
+                import traceback
                 try:
                     self.log.emit("Ejecutando revision...")
                     payload = task(*args, **kwargs)
                     self.result.emit(payload)
                     self.log.emit("Listo.")
                 except Exception as exc:  # pragma: no cover - Qt path
-                    self.error.emit(str(exc))
-                    self.log.emit(f"Error: {exc}")
+                    error_msg = f"{exc}\n{traceback.format_exc()}"
+                    self.error.emit(error_msg)
+                    self.log.emit(f"Error inesperado: {exc}")
                 finally:
                     self.finished.emit()
 
