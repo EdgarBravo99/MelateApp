@@ -165,6 +165,45 @@ def run_report(draw: int, result_text: str, played_text: str) -> dict[str, Any]:
     )
 
 
+def initialize_memory(db_path: str | Path = DEFAULT_DB_PATH) -> dict[str, Any]:
+    init_db(db_path)
+    return validate_output_json({"memory_path": str(db_path), "initialized": True})
+
+
+def run_guardrail_scan() -> dict[str, Any]:
+    from scripts.run_guardrail_scan import run_scan
+    return validate_output_json(run_scan())
+
+
+def get_build_info() -> dict[str, Any]:
+    from .packaging import build_info
+    return validate_output_json(build_info())
+
+
+def run_history_summary(db_path: str | Path = DEFAULT_DB_PATH) -> dict[str, Any]:
+    from .historical_analysis import summarize_history
+    history = load_draw_history(db_path)
+    return validate_output_json(summarize_history(history))
+
+
+def validate_desktop_config(db_path: str | Path = DEFAULT_DB_PATH) -> dict[str, Any]:
+    return validate_output_json({
+        "db_path": str(db_path),
+        "db_exists": Path(db_path).exists(),
+        "outputs_path": str(Path("outputs").resolve())
+    })
+
+
+def test_llm_connection() -> dict[str, Any]:
+    from .llm_provider import call_llm, get_llm_config
+    config = get_llm_config()
+    if config["provider"] in ("disabled", "local_stub"):
+        return validate_output_json({"status": "disabled", "message": "Analista LLM desactivado; usando analista local."})
+    res = call_llm("Prueba de conexion", system_prompt="Responde solo 'OK' en JSON: {\"status\": \"OK\"}")
+    if res:
+        return validate_output_json({"status": "success", "message": f"Conexion exitosa a {config['provider']}"})
+    return validate_output_json({"status": "error", "message": "Fallo la conexion al proveedor LLM configurado."})
+
 def open_report(path: str | Path) -> dict[str, str]:
     report_path = Path(path)
     if not report_path.exists():
@@ -174,3 +213,4 @@ def open_report(path: str | Path) -> dict[str, str]:
     else:
         webbrowser.open(report_path.resolve().as_uri())
     return {"opened": str(report_path)}
+

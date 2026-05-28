@@ -8,12 +8,14 @@ from typing import Any
 
 FORBIDDEN_TERMS = [
     "predicción",
+    "predecir",
     "probabilidad",
     "seguro",
     "garantizado",
     "certeza",
     "va a salir",
     "ganador",
+    "apostar",
     "más probable",
     "mejor probabilidad",
     "win probability",

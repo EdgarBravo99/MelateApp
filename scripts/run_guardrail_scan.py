@@ -12,17 +12,20 @@ SCAN_TARGETS = [ROOT / "melate_app_lab", ROOT / "tests", ROOT / "README.md"]
 ALLOWLIST = {
     ROOT / "melate_app_lab" / "guardrails.py",
     ROOT / "tests" / "test_guardrails.py",
+    ROOT / "tests" / "test_llm_analyst.py",
     ROOT / ".agents" / "skills" / "melate-guardrails" / "SKILL.md",
     Path(__file__).resolve(),
 }
 FORBIDDEN_TERMS = [
     "predicción",
+    "predecir",
     "probabilidad",
     "seguro",
     "garantizado",
     "certeza",
     "va a salir",
     "ganador",
+    "apostar",
     "más probable",
     "mejor probabilidad",
     "win probability",

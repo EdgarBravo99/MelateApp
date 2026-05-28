@@ -178,7 +178,8 @@ def launch_desktop() -> int:
         
         # Update info cards
         if records:
-            history_cards["Ultimo sorteo"].setText(f"Ultimo sorteo\n{records[0].get('draw', '-')}")
+            ultimo_sorteo = max(int(record.get('draw', 0)) for record in records)
+            history_cards["Ultimo sorteo"].setText(f"Ultimo sorteo\n{ultimo_sorteo}")
             history_cards["Sorteos cargados"].setText(f"Sorteos cargados\n{len(records)}")
             next_draw = controller.suggest_next_draw_from_memory(DEFAULT_DB_PATH)
             sug_draw = next_draw.get('next_draw', '-')
@@ -244,6 +245,12 @@ def launch_desktop() -> int:
                 f"Anclas\n{stress.get('anchor_concentration', {}).get('repeated_numbers', '-')}"
             )
             metric_labels["Alertas"].setText(f"Alertas\n{len(stress.get('review_alerts_es', []))}")
+        if payload.get("llm_provider"):
+            prov = payload["llm_provider"]
+            if prov in ("disabled", "local_stub"):
+                metric_labels["Analista"].setText(f"Analista\nLocal")
+            else:
+                metric_labels["Analista"].setText(f"Analista\n{prov}")
 
     def finish_action(ok: bool = True) -> None:
         progress.setRange(0, 1)
@@ -266,13 +273,23 @@ def launch_desktop() -> int:
             
         progress.setRange(0, 0)
         log(f"Ejecutando {name}...")
+        
+        action_state = {"error": False}
+        
+        def _on_error(msg: str) -> None:
+            action_state["error"] = True
+            handle_error(msg)
+            
+        def _on_finished() -> None:
+            finish_action(not action_state["error"])
+
         if threaded:
             qt_runner.run(
                 fn,
                 on_log=log,
                 on_result=handle_payload,
-                on_error=handle_error,
-                on_finished=lambda: finish_action(True),
+                on_error=_on_error,
+                on_finished=_on_finished,
             )
             return
 
@@ -280,10 +297,10 @@ def launch_desktop() -> int:
         def execute_sync():
             worker_result = run_task_sync(fn, log=log)
             if not worker_result.ok:
-                handle_error(worker_result.error or "Error")
+                _on_error(worker_result.error or "Error")
             else:
                 handle_payload(worker_result.result)
-                finish_action(True)
+            _on_finished()
                 
         QTimer.singleShot(50, execute_sync)
         
@@ -376,7 +393,7 @@ def launch_desktop() -> int:
     metrics = QGridLayout()
     metrics.setSpacing(12)
     metric_labels = {}
-    for index, name in enumerate(["Capturados", "No capturados", "Suma", "Banda", "Firma", "Anclas", "Alertas"]):
+    for index, name in enumerate(["Capturados", "No capturados", "Suma", "Banda", "Firma", "Anclas", "Alertas", "Analista"]):
         card = QLabel(f"{name}\n-")
         card.setObjectName("MetricCard")
         card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -495,9 +512,19 @@ def launch_desktop() -> int:
     settings_grid.addWidget(QLabel("Modo de revision"), 2, 0)
     settings_grid.addWidget(QLabel("review_default (Guardrails activos)"), 2, 1)
     
+    from .llm_provider import get_llm_config
+    llm_cfg = get_llm_config()
+    settings_grid.addWidget(QLabel("Estado LLM"), 3, 0)
+    settings_grid.addWidget(QLabel(llm_cfg["provider"]), 3, 1)
+    settings_grid.addWidget(QLabel("Modelo LLM"), 4, 0)
+    settings_grid.addWidget(QLabel(llm_cfg["model"]), 4, 1)
+    settings_grid.addWidget(QLabel("Base URL LLM"), 5, 0)
+    settings_grid.addWidget(QLabel(llm_cfg["base_url"] or "-"), 5, 1)
+    
     init_memory_button = QPushButton("Inicializar memoria")
     validate_config_button = QPushButton("Guardrail Scan")
     build_info_button = QPushButton("Build Info")
+    test_llm_button = QPushButton("Test analista LLM")
     
     init_memory_button.clicked.connect(
         lambda: run_action("Inicializar memoria", lambda: controller.initialize_memory(DEFAULT_DB_PATH), False)
@@ -508,16 +535,20 @@ def launch_desktop() -> int:
     build_info_button.clicked.connect(
         lambda: run_action("Build info", lambda: controller.get_build_info(), False)
     )
+    test_llm_button.clicked.connect(
+        lambda: run_action("Test LLM", lambda: controller.test_llm_connection(), True)
+    )
     
     action_row = QHBoxLayout()
     action_row.addWidget(init_memory_button)
     action_row.addWidget(validate_config_button)
     action_row.addWidget(build_info_button)
+    action_row.addWidget(test_llm_button)
     action_row.addStretch()
     
-    action_buttons.extend([init_memory_button, validate_config_button, build_info_button])
+    action_buttons.extend([init_memory_button, validate_config_button, build_info_button, test_llm_button])
     
-    settings_grid.addLayout(action_row, 3, 0, 1, 2)
+    settings_grid.addLayout(action_row, 6, 0, 1, 2)
     settings_grid.setColumnStretch(1, 1)
     settings_layout.addWidget(settings_panel)
     settings_layout.addStretch(1)
