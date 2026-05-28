@@ -11,52 +11,7 @@ from .number_utils import parse_numbers
 from .postmortem import postmortem_review
 from .relation_graph import build_relation_graph
 
-
-class LLMAnalystStub:
-    def review(self, components: dict[str, object], memory_lessons: list[dict[str, object]]) -> dict[str, str]:
-        postmortem = components["postmortem"]
-        trace = components["trace"]
-        stress = components["stress_review"]
-        history_summary = components.get("history_summary") or {}
-        captured = postmortem["captured_numbers"]
-        missed = postmortem["missed_numbers"]
-        repeated = stress.get("anchor_concentration", {}).get("repeated_numbers", [])
-        memory_note = (
-            f" Memoria local consultada: {len(memory_lessons)} lecciones recientes."
-            if memory_lessons
-            else " Memoria local sin lecciones previas para este contexto."
-        )
-        history_count = history_summary.get("total_draws") or history_summary.get("draw_count")
-        history_note = (
-            f" Historial local revisado: {history_count} registros."
-            if history_count
-            else " Historial local no cargado para esta revision."
-        )
-        return {
-            "diagnosis_es": (
-                "Diagnostico de revision: el set jugado capturo parte del rastro, "
-                "pero dejo abierta una franja alta y un inicio bajo del resultado."
-                + memory_note
-            ),
-            "what_worked_es": f"Funciono la captura de numeros {', '.join(map(str, captured))}.",
-            "what_was_missed_es": f"No se capturaron {', '.join(map(str, missed))}.",
-            "structural_reading_es": (
-                f"Lectura estructural: suma {trace['sum']}, banda {trace['sum_band']}, "
-                f"firma {trace['block_signature']} y anclas repetidas {repeated}."
-            ),
-            "history_context_es": (
-                "Contexto historico descriptivo: se usa solo para comparar huellas ya registradas."
-                + history_note
-            ),
-            "next_cycle_review_thesis_es": (
-                "Tesis de revision siguiente ciclo: ampliar diversidad de firmas, "
-                "revisar concentracion de anclas y documentar cobertura por bloques."
-            ),
-            "risk_notes_es": (
-                "Notas de revision: evitar que anclas repetidas reduzcan diversidad del set "
-                "y mantener el analisis como postmortem local."
-            ),
-        }
+from .llm_analyst import LLMAnalystEngine
 
 
 def _memory_lessons(db_path: Path) -> list[dict[str, object]]:
@@ -115,7 +70,7 @@ def build_deep_review(
         "recent_theses": theses,
         "history_summary": history_summary,
     }
-    narrative = LLMAnalystStub().review(components, lessons)
+    narrative = LLMAnalystEngine().review(components, lessons)
     report = {
         "draw": int(draw),
         "result_numbers": result,

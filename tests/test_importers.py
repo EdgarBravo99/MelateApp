@@ -48,11 +48,14 @@ def test_parse_draw_json_imports_4218_fixture(tmp_path):
     assert records[0]["block_signature"] == "1-1-1-1-2"
 
 
-def test_import_rejects_duplicates():
+def test_import_skips_duplicates():
     records = parse_draw_csv("data/samples/revancha_4218.csv")
 
-    with pytest.raises(ValueError, match="Duplicate draw"):
-        import_draws_to_memory([*records, *records])
+    connection = import_draws_to_memory([*records, *records])
+
+    history = load_draw_history(connection, game="revancha")
+
+    assert [record["draw"] for record in history] == [4218]
 
 
 def test_import_rejects_numbers_out_of_range():
@@ -90,4 +93,3 @@ def test_import_saves_and_loads_ordered():
     history = load_draw_history(connection, game="revancha")
 
     assert [record["draw"] for record in history] == [4218, 4219]
-

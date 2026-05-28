@@ -178,3 +178,10 @@ def guardrail_scan_command() -> None:
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
     if result["violations"]:
         raise typer.Exit(1)
+
+
+@app.command("llm-status")
+def llm_status_command() -> None:
+    from .llm_provider import get_llm_config
+
+    _json(get_llm_config())
