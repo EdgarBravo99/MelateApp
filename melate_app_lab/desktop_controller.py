@@ -22,6 +22,22 @@ def _ensure_db_parent(db_path: str | Path) -> None:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
 
+def parse_ticket(text: str) -> list[int]:
+    numbers = parse_numbers(text)
+    if len(numbers) != 6:
+        raise ValueError(f"El resultado debe contener exactamente 6 numeros (se encontraron {len(numbers)}).")
+    
+    out_of_range = [number for number in numbers if number < 1 or number > 56]
+    if out_of_range:
+        raise ValueError(f"Numeros fuera de rango 1-56: {out_of_range}.")
+
+    duplicates = sorted({number for number in numbers if numbers.count(number) > 1})
+    if duplicates:
+        raise ValueError(f"Numeros duplicados en el resultado: {duplicates}.")
+        
+    return numbers
+
+
 def parse_played_tickets_flexible(text: str) -> list[list[int]]:
     numbers = [int(match) for match in re.findall(r"\d+", text)]
     if not numbers:

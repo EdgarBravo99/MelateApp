@@ -411,33 +411,86 @@ def launch_desktop() -> int:
     button_row = QHBoxLayout(button_panel)
     button_row.setContentsMargins(14, 14, 14, 14)
     button_row.setSpacing(10)
-    actions = [
-        ("Trace", lambda: controller.run_trace(int(draw_input.text() or 0), result_input.text()), False),
-        (
-            "Postmortem",
-            lambda: controller.run_postmortem(int(draw_input.text() or 0), result_input.text(), played_input.toPlainText()),
-            False,
-        ),
-        ("Stress Review", lambda: controller.run_stress(result_input.text(), played_input.toPlainText()), True),
-        (
-            "Brain Review",
-            lambda: controller.run_brain(int(draw_input.text() or 0), result_input.text(), played_input.toPlainText()),
-            True,
-        ),
-        (
-            "Remember",
-            lambda: controller.run_remember(int(draw_input.text() or 0), result_input.text(), played_input.toPlainText()),
-            False,
-        ),
-        (
-            "Generate Report",
-            lambda: controller.run_report(int(draw_input.text() or 0), result_input.text(), played_input.toPlainText()),
-            False,
-        ),
+    def get_draw() -> int:
+        try:
+            return int(draw_input.text() or 0)
+        except ValueError:
+            raise ValueError("El sorteo debe ser un numero entero.")
+
+    def validate_inputs(require_draw=True, require_result=True, require_played=True):
+        draw = 0
+        if require_draw:
+            draw = get_draw()
+        
+        result_text = result_input.text()
+        if require_result:
+            try:
+                controller.parse_ticket(result_text)
+            except ValueError as e:
+                raise ValueError(f"Resultado invalido: {e}")
+                
+        played_text = played_input.toPlainText()
+        if require_played:
+            try:
+                controller.parse_played_tickets_flexible(played_text)
+            except ValueError as e:
+                raise ValueError(f"Boletos jugados invalidos: {e}")
+                
+        return draw, result_text, played_text
+
+    def start_trace():
+        try:
+            draw, result_text, _ = validate_inputs(require_played=False)
+            run_action("Trace", lambda: controller.run_trace(draw, result_text), False)
+        except Exception as e:
+            log(f"Error: {e}")
+
+    def start_postmortem():
+        try:
+            draw, result_text, played_text = validate_inputs()
+            run_action("Postmortem", lambda: controller.run_postmortem(draw, result_text, played_text), False)
+        except Exception as e:
+            log(f"Error: {e}")
+
+    def start_stress_review():
+        try:
+            _, result_text, played_text = validate_inputs(require_draw=False)
+            run_action("Stress Review", lambda: controller.run_stress(result_text, played_text), True)
+        except Exception as e:
+            log(f"Error: {e}")
+
+    def start_brain_review():
+        try:
+            draw, result_text, played_text = validate_inputs()
+            run_action("Brain Review", lambda: controller.run_brain(draw, result_text, played_text), True)
+        except Exception as e:
+            log(f"Error: {e}")
+
+    def start_remember():
+        try:
+            draw, result_text, played_text = validate_inputs()
+            run_action("Remember", lambda: controller.run_remember(draw, result_text, played_text), False)
+        except Exception as e:
+            log(f"Error: {e}")
+
+    def start_generate_report():
+        try:
+            draw, result_text, played_text = validate_inputs()
+            run_action("Generate Report", lambda: controller.run_report(draw, result_text, played_text), False)
+        except Exception as e:
+            log(f"Error: {e}")
+
+    actions_config = [
+        ("Trace", start_trace),
+        ("Postmortem", start_postmortem),
+        ("Stress Review", start_stress_review),
+        ("Brain Review", start_brain_review),
+        ("Remember", start_remember),
+        ("Generate Report", start_generate_report),
     ]
-    for label, fn, threaded in actions:
+    for label, fn in actions_config:
         button = QPushButton(label)
-        button.clicked.connect(lambda _checked=False, label=label, fn=fn, threaded=threaded: run_action(label, fn, threaded))
+        button.clicked.connect(fn)
         button_row.addWidget(button)
         action_buttons.append(button)
     analysis_layout.addWidget(button_panel)

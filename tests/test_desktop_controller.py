@@ -6,6 +6,7 @@ from melate_app_lab.desktop_controller import (
     parse_played_tickets_flexible,
     run_brain,
     run_report,
+    run_stress,
     suggest_next_draw_from_memory,
 )
 
@@ -79,6 +80,26 @@ def test_run_brain_works_without_ui():
     review = run_brain(4218, RESULT, PLAYED_TEXT)
 
     assert review["components"]["postmortem"]["captured_numbers"] == [18, 52]
+
+
+def test_run_stress_works_without_ui():
+    review = run_stress(RESULT, PLAYED_TEXT)
+    assert "played_coverage" in review
+
+
+def test_run_stress_invalid_input_raises_value_error():
+    import pytest
+    with pytest.raises(ValueError):
+        run_stress("invalid", PLAYED_TEXT)
+        
+    with pytest.raises(ValueError):
+        run_stress(RESULT, "only 5 numbers here 1 2 3 4")
+
+
+def test_run_brain_invalid_input_raises_value_error():
+    import pytest
+    with pytest.raises(ValueError):
+        run_brain(4218, "invalid", PLAYED_TEXT)
 
 
 def test_run_report_returns_paths(tmp_path, monkeypatch):
