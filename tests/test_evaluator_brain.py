@@ -17,5 +17,8 @@ def test_brain_review_integrates_components_and_guardrails():
     assert "18" in review["what_worked_es"]
     assert "52" in review["what_worked_es"]
     assert "2, 22, 38, 51" in review["what_was_missed_es"]
+    assert "structural_reading_es" in review
+    assert "history_context_es" in review
+    assert "graph_stats" in review["components"]["graph"]
     assert {"trace", "postmortem", "graph", "stress_review"} <= set(review["components"])
     assert validate_output_json(review) == review
