@@ -330,7 +330,8 @@ def launch_desktop() -> int:
             raise FileNotFoundError("Selecciona un reporte JSON en la tabla.")
         return controller.open_report(path)
 
-    def import_resultados_csv_dialog() -> object:
+    def start_import_csv_workflow() -> None:
+        """Open file dialog in UI thread, then run import in worker thread."""
         file_path, _selected_filter = QFileDialog.getOpenFileName(
             window,
             "Importar resultados.csv",
@@ -338,10 +339,14 @@ def launch_desktop() -> int:
             "CSV files (*.csv)",
         )
         if not file_path:
-            return {"imported": 0, "message": "Importacion cancelada."}
-            
-        from .resultados_importer import import_resultados_csv_to_memory
-        return import_resultados_csv_to_memory(file_path, DEFAULT_DB_PATH)
+            log("Importacion cancelada por el usuario.")
+            return
+
+        def _do_import() -> object:
+            from .resultados_importer import import_resultados_csv_to_memory
+            return import_resultados_csv_to_memory(file_path, DEFAULT_DB_PATH)
+
+        run_action("Importar resultados", _do_import, threaded=True)
 
     def suggest_next() -> None:
         try:
@@ -458,7 +463,7 @@ def launch_desktop() -> int:
     refresh_history_button = QPushButton("Actualizar tabla")
     summarize_history_button = QPushButton("Resumen historico")
     
-    import_res_button.clicked.connect(lambda: run_action("Importar resultados", import_resultados_csv_dialog, True))
+    import_res_button.clicked.connect(start_import_csv_workflow)
     refresh_history_button.clicked.connect(lambda: run_action("Actualizar historial", refresh_history_table, False))
     summarize_history_button.clicked.connect(
         lambda: run_action("Resumen historico", lambda: controller.run_history_summary(DEFAULT_DB_PATH), False)

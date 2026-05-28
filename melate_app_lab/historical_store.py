@@ -54,7 +54,7 @@ def import_draws_to_memory(
     _ensure_schema(connection)
 
     for record in records:
-        insert_draw_record(connection, record)
+        insert_draw_record(connection, record, commit=False, ensure_schema=False)
 
     connection.commit()
     return connection
@@ -63,8 +63,11 @@ def import_draws_to_memory(
 def insert_draw_record(
     connection: sqlite3.Connection,
     record: dict[str, Any],
+    commit: bool = True,
+    ensure_schema: bool = True,
 ) -> bool:
-    _ensure_schema(connection)
+    if ensure_schema:
+        _ensure_schema(connection)
     normalized = normalize_draw_record(record)
     cursor = connection.execute(
         """
@@ -85,7 +88,8 @@ def insert_draw_record(
             normalized["block_presence_signature"],
         ),
     )
-    connection.commit()
+    if commit:
+        connection.commit()
     return cursor.rowcount == 1
 
 
