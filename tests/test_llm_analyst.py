@@ -20,6 +20,7 @@ def test_llm_provider_config_leak():
         config = get_llm_config()
         assert "api_key" not in config
         assert "supersecretkey" not in config.values()
+        assert "supersecretkey" not in json.dumps(config)
         assert config["api_key_configured"] is True
 
 
