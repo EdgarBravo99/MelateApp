@@ -138,13 +138,22 @@ def report(
 
 @app.command("import-history")
 def import_history(file: Annotated[Path, typer.Option("--file")]) -> None:
-    from .historical_store import import_draws_to_memory, load_draw_history
-    from .importers import parse_draw_csv, parse_draw_json
+    if file.suffix.lower() == ".json":
+        from .historical_store import import_draws_to_memory, load_draw_history
+        from .importers import parse_draw_json
 
-    records = parse_draw_json(file) if file.suffix.lower() == ".json" else parse_draw_csv(file)
-    import_draws_to_memory(records, DEFAULT_DB_PATH)
-    history = load_draw_history(DEFAULT_DB_PATH)
-    _json({"imported": len(records), "history_count": len(history), "memory_path": str(DEFAULT_DB_PATH)})
+        records = parse_draw_json(file)
+        import_draws_to_memory(records, DEFAULT_DB_PATH)
+        history = load_draw_history(DEFAULT_DB_PATH)
+        _json({"imported": len(records), "history_count": len(history), "memory_path": str(DEFAULT_DB_PATH)})
+    else:
+        from .resultados_importer import import_resultados_csv_to_memory
+
+        result = import_resultados_csv_to_memory(file, DEFAULT_DB_PATH)
+        result["memory_path"] = str(DEFAULT_DB_PATH)
+        # Remove sample rows from CLI output for cleanliness
+        result.pop("invalid_row_samples", None)
+        _json(result)
 
 
 @app.command("history-summary")

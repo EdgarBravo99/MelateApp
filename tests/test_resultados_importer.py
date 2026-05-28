@@ -101,14 +101,14 @@ def test_import_skips_duplicates_and_reports_history_summary(tmp_path):
 
     result = import_resultados_csv_to_memory(path, db_path)
 
-    assert result == {
-        "imported": 1,
-        "duplicates_skipped": 1,
-        "invalid_rows": 0,
-        "history_count": 1,
-        "latest_draw": 4218,
-        "suggested_next_draw": 4219,
-    }
+    assert result["imported"] == 1
+    assert result["duplicates_skipped"] == 1
+    assert result["invalid_rows"] == 0
+    assert result["history_count"] == 1
+    assert result["latest_draw"] == 4218
+    assert result["suggested_next_draw"] == 4219
+    assert result["encoding_used"] in ("utf-8-sig", "utf-8")
+    assert result["invalid_row_samples"] == []
 
 
 def test_historical_store_latest_next_and_limited_history_by_game(tmp_path):
@@ -148,3 +148,89 @@ def test_historical_store_accepts_existing_connection_with_limit(tmp_path):
         assert [record["draw"] for record in load_draw_history(connection, limit=1)] == [4218]
     finally:
         connection.close()
+
+
+def test_import_utf8_sig_csv(tmp_path):
+    path = tmp_path / "bom.csv"
+    path.write_bytes(
+        b"\xef\xbb\xbfdraw,date,n1,n2,n3,n4,n5,n6\n"
+        b"4218,2026-05-27,2,18,22,38,51,52\n"
+    )
+    result = import_resultados_csv_to_memory(path, tmp_path / "h.sqlite")
+    assert result["imported"] == 1
+    assert result["encoding_used"] == "utf-8-sig"
+
+
+def test_import_latin1_csv(tmp_path):
+    path = tmp_path / "latin.csv"
+    header = "concurso,fecha,número1,número2,número3,número4,número5,número6\n"
+    row = "4218,2026-05-27,2,18,22,38,51,52\n"
+    path.write_bytes((header + row).encode("latin-1"))
+    result = import_resultados_csv_to_memory(path, tmp_path / "h.sqlite")
+    assert result["imported"] == 1
+    assert result["encoding_used"] == "latin-1"
+
+
+def test_import_skips_empty_rows(tmp_path):
+    path = tmp_path / "blanks.csv"
+    path.write_text(
+        "draw,date,n1,n2,n3,n4,n5,n6\n"
+        "4218,2026-05-27,2,18,22,38,51,52\n"
+        ",,,,,,,\n"
+        "\n"
+        "4219,2026-05-28,1,11,21,31,41,51\n",
+        encoding="utf-8",
+    )
+    result = import_resultados_csv_to_memory(path, tmp_path / "h.sqlite")
+    assert result["imported"] == 2
+    assert result["invalid_rows"] == 0
+
+
+def test_import_captures_invalid_row_samples(tmp_path):
+    path = tmp_path / "bad.csv"
+    path.write_text(
+        "draw,date,n1,n2,n3,n4,n5,n6\n"
+        "4218,2026-05-27,2,18,22,38,51,52\n"
+        "bad_draw,no-date,x,y,z,w,a,b\n",
+        encoding="utf-8",
+    )
+    result = import_resultados_csv_to_memory(path, tmp_path / "h.sqlite")
+    assert result["imported"] == 1
+    assert result["invalid_rows"] == 1
+    assert len(result["invalid_row_samples"]) == 1
+
+
+def test_import_pakin_revancha_style_csv_with_extras(tmp_path):
+    """Simulates a Pakin/Revancha CSV with extra columns, accents, and duplicates."""
+    path = tmp_path / "revancha_pakin.csv"
+    path.write_text(
+        "Concurso,Fecha,Número1,Número2,Número3,Número4,Número5,Número6,Acumulado,Ganadores\n"
+        "4215,2026-05-24,1,11,21,31,41,51,$50000,0\n"
+        "4216,2026-05-25,5,15,25,35,45,55,$60000,1\n"
+        "4217,2026-05-26,3,13,23,33,43,53,$70000,0\n"
+        "4218,2026-05-27,2,18,22,38,51,52,$80000,2\n"
+        "4218,2026-05-27,2,18,22,38,51,52,$80000,2\n",
+        encoding="utf-8",
+    )
+    result = import_resultados_csv_to_memory(path, tmp_path / "h.sqlite")
+    assert result["imported"] == 4
+    assert result["duplicates_skipped"] == 1
+    assert result["invalid_rows"] == 0
+    assert result["history_count"] == 4
+    assert result["latest_draw"] == 4218
+    assert result["suggested_next_draw"] == 4219
+
+
+def test_bulk_import_many_rows(tmp_path):
+    """Ensure bulk import with >500 rows works and commits in chunks."""
+    lines = ["draw,date,n1,n2,n3,n4,n5,n6"]
+    for i in range(600):
+        draw = 1000 + i
+        lines.append(f"{draw},2026-01-01,1,11,21,31,41,51")
+    path = tmp_path / "bulk.csv"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    result = import_resultados_csv_to_memory(path, tmp_path / "h.sqlite")
+    assert result["imported"] == 600
+    assert result["duplicates_skipped"] == 0
+    assert result["invalid_rows"] == 0
+    assert result["history_count"] == 600
