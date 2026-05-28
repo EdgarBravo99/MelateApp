@@ -25,3 +25,20 @@ def test_postmortem_accepts_single_played_option_with_multiple_values():
     assert '"captured_numbers"' in result.output
     assert "18" in result.output
     assert "52" in result.output
+
+
+def test_build_info_command_returns_packaging_metadata():
+    runner = CliRunner()
+    result = runner.invoke(app, ["build-info"])
+
+    assert result.exit_code == 0
+    assert '"dist_path"' in result.output
+    assert "PyInstaller" in result.output
+
+
+def test_guardrail_scan_command_runs():
+    runner = CliRunner()
+    result = runner.invoke(app, ["guardrail-scan"])
+
+    assert result.exit_code == 0
+    assert '"violations": []' in result.output

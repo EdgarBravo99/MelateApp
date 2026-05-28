@@ -5,6 +5,13 @@ from itertools import combinations
 from pathlib import Path
 from typing import Iterable
 
+from .graph_optimizer import (
+    build_graph_stats,
+    captured_pairs,
+    select_missed_played_relations,
+    severity_for_edge,
+    summarize_edges,
+)
 from .guardrails import validate_output_json
 from .number_utils import number_block, parse_numbers
 from .postmortem import postmortem_review
@@ -20,6 +27,7 @@ def _edge(source: int, target: int, edge_type: str, evidence: str) -> dict[str, 
         "target": f"n{target}",
         "numbers": sorted([source, target]),
         "type": edge_type,
+        "severity": severity_for_edge(edge_type),
         "evidence_es": evidence,
     }
 
@@ -36,6 +44,7 @@ def build_relation_graph(
         postmortem_result = postmortem_review(draw, result, played)
     captured = set(postmortem_result.get("captured_numbers", []) if postmortem_result else [])
     missed = set(postmortem_result.get("missed_numbers", []) if postmortem_result else [])
+    repeated_anchors = set(postmortem_result.get("overused_played_numbers", []) if postmortem_result else [])
     played_numbers = {number for ticket in played for number in ticket}
     all_numbers = set(result) | played_numbers | captured | missed
 
@@ -65,16 +74,28 @@ def build_relation_graph(
     for number in result:
         edges.append(_edge(number, number, "trace_member", f"Miembro del rastro del sorteo {draw}."))
 
-    for left, right in combinations(sorted(captured), 2):
+    for left, right in captured_pairs(captured):
         edges.append(_edge(left, right, "captured_together", "Capturados dentro del set jugado."))
 
-    for number in sorted(missed):
-        for played_number in sorted(played_numbers):
-            edges.append(
-                _edge(number, played_number, "missed_from_played_set", "No capturado frente al set jugado.")
-            )
+    missed_relations = select_missed_played_relations(missed, played_numbers, captured, repeated_anchors)
+    for number, played_number, reasons in missed_relations:
+        reason_text = ", ".join(reasons)
+        edge = _edge(
+            number,
+            played_number,
+            "missed_from_played_set",
+            f"No capturado frente a referencia jugada: {reason_text}.",
+        )
+        edge["relation_reasons"] = reasons
+        edges.append(edge)
 
-    graph = {"nodes": nodes, "edges": edges, "metadata": {"draw": int(draw), "review_mode": "review_default"}}
+    graph = {
+        "nodes": nodes,
+        "edges": edges,
+        "edge_summary": summarize_edges(edges),
+        "graph_stats": build_graph_stats(nodes, edges, result, played_numbers, captured, missed, missed_relations),
+        "metadata": {"draw": int(draw), "review_mode": "review_default"},
+    }
     return validate_output_json(graph)
 
 

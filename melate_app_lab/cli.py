@@ -20,7 +20,7 @@ from .montecarlo_stress import stress_review
 from .number_utils import parse_numbers
 from .postmortem import postmortem_review
 from .relation_graph import build_relation_graph, export_relation_graph
-from .report_writer import write_html_report, write_json_report
+from .report_writer import write_csv_summary, write_html_report, write_json_report
 
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
@@ -129,6 +129,52 @@ def report(
     review = brain_review(draw, parse_numbers(result), _played_from_option(played, ctx.args))
     json_path = Path("outputs") / f"postmortem_{draw}.json"
     html_path = Path("outputs") / f"postmortem_{draw}.html"
+    csv_path = Path("outputs") / f"postmortem_{draw}.csv"
     write_json_report(review, json_path)
     write_html_report(review, html_path)
-    _json({"draw": draw, "json_path": str(json_path), "html_path": str(html_path)})
+    write_csv_summary(review, csv_path)
+    _json({"draw": draw, "json_path": str(json_path), "html_path": str(html_path), "csv_path": str(csv_path)})
+
+
+@app.command("import-history")
+def import_history(file: Annotated[Path, typer.Option("--file")]) -> None:
+    from .historical_store import import_draws_to_memory, load_draw_history
+    from .importers import parse_draw_csv, parse_draw_json
+
+    records = parse_draw_json(file) if file.suffix.lower() == ".json" else parse_draw_csv(file)
+    import_draws_to_memory(records, DEFAULT_DB_PATH)
+    history = load_draw_history(DEFAULT_DB_PATH)
+    _json({"imported": len(records), "history_count": len(history), "memory_path": str(DEFAULT_DB_PATH)})
+
+
+@app.command("history-summary")
+def history_summary() -> None:
+    from .historical_analysis import summarize_history
+    from .historical_store import load_draw_history
+
+    history = load_draw_history(DEFAULT_DB_PATH)
+    _json(summarize_history(history))
+
+
+@app.command()
+def desktop() -> None:
+    from .desktop_app import launch_desktop
+
+    raise typer.Exit(launch_desktop())
+
+
+@app.command("build-info")
+def build_info_command() -> None:
+    from .packaging import build_info
+
+    _json(build_info())
+
+
+@app.command("guardrail-scan")
+def guardrail_scan_command() -> None:
+    from scripts.run_guardrail_scan import run_scan
+
+    result = run_scan()
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+    if result["violations"]:
+        raise typer.Exit(1)
