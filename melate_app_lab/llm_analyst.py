@@ -86,7 +86,9 @@ class LLMAnalystEngine:
                 "action_items_es": str(parsed.get("action_items_es", "")),
                 "confidence_notes_es": str(parsed.get("confidence_notes_es", "")),
                 "llm_provider": config["provider"],
-                "llm_model": config["model"]
+                "llm_model": config["model"],
+                "used_llm": True,
+                "fallback_used": False
             }
             
             # Pasar por validate_output_json para garantizar guardrails.
@@ -144,5 +146,8 @@ class LLMAnalystEngine:
                 "Notas de revision: evitar que anclas repetidas reduzcan diversidad del set "
                 "y mantener el analisis como postmortem local."
             ),
-            "llm_provider": "local_stub"
+            "llm_provider": "local_stub",
+            "llm_model": "none",
+            "used_llm": False,
+            "fallback_used": True
         }

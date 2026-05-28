@@ -108,6 +108,12 @@ def test_history_import_table_and_next_draw(tmp_path):
     assert suggestion["review_default"]["mode"] == "review_default"
 
 
+def test_suggest_next_draw_from_memory_empty_db(tmp_path):
+    db_path = tmp_path / "memory.sqlite"
+    suggestion = suggest_next_draw_from_memory(db_path)
+    assert suggestion["next_draw"] == 4218
+
+
 def test_list_report_files_detects_html_json_csv(tmp_path):
     outputs = tmp_path / "outputs"
     outputs.mkdir()

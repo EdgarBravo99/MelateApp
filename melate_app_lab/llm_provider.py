@@ -7,8 +7,8 @@ import urllib.request
 from typing import Any, Dict
 
 
-def get_llm_config() -> Dict[str, str]:
-    """Carga configuracion LLM desde variables de entorno de forma segura."""
+def _get_llm_config_internal() -> Dict[str, str]:
+    """Carga configuracion LLM desde variables de entorno con secretos internos."""
     return {
         "provider": os.environ.get("MELATE_LLM_PROVIDER", "disabled").lower(),
         "model": os.environ.get("MELATE_LLM_MODEL", "gpt-3.5-turbo"),
@@ -18,9 +18,19 @@ def get_llm_config() -> Dict[str, str]:
     }
 
 
+def get_llm_config() -> Dict[str, Any]:
+    """Expone configuracion publica sin secretos."""
+    config = _get_llm_config_internal()
+    api_key = config.pop("api_key", "")
+    # Cast to Dict[str, Any] via a new dict
+    public_config: Dict[str, Any] = dict(config)
+    public_config["api_key_configured"] = bool(api_key.strip())
+    return public_config
+
+
 def call_llm(prompt: str, system_prompt: str | None = None) -> str | None:
     """Invoca al LLM configurado usando urllib nativo para mantener cero dependencias."""
-    config = get_llm_config()
+    config = _get_llm_config_internal()
     provider = config["provider"]
 
     if provider == "disabled" or provider == "local_stub":

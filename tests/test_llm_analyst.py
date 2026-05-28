@@ -14,6 +14,15 @@ def test_llm_provider_disabled_uses_fallback():
         assert "Diagnostico de revision" in res["diagnosis_es"]
 
 
+def test_llm_provider_config_leak():
+    from melate_app_lab.llm_provider import get_llm_config
+    with patch.dict(os.environ, {"MELATE_LLM_API_KEY": "supersecretkey"}):
+        config = get_llm_config()
+        assert "api_key" not in config
+        assert "supersecretkey" not in config.values()
+        assert config["api_key_configured"] is True
+
+
 def test_llm_valid_mock_uses_llm_narrative():
     with patch.dict(os.environ, {"MELATE_LLM_PROVIDER": "openai_compatible", "MELATE_LLM_API_KEY": "secret"}):
         def mock_provider(prompt, system):

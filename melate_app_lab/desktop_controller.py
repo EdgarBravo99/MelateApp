@@ -54,9 +54,10 @@ def parse_multiline_tickets(text: str) -> list[list[int]]:
 
 
 def suggest_next_draw_from_memory(db_path: str | Path = DEFAULT_DB_PATH) -> dict[str, Any]:
+    from .historical_store import suggest_next_draw, load_draw_history
     _ensure_db_parent(db_path)
+    next_draw = suggest_next_draw(db_path)
     history = load_draw_history(db_path)
-    next_draw = max((int(record["draw"]) for record in history), default=0) + 1
     return validate_output_json(
         {
             "next_draw": next_draw,
@@ -75,25 +76,31 @@ def import_history_file(path: str | Path, db_path: str | Path = DEFAULT_DB_PATH)
     history_path = Path(path)
     suffix = history_path.suffix.casefold()
     if suffix == ".csv":
-        records = parse_draw_csv(history_path)
+        from .resultados_importer import import_resultados_csv_to_memory
+        res = import_resultados_csv_to_memory(history_path, db_path)
+        res["memory_path"] = str(db_path)
+        res["review_default"] = {
+            "mode": "review_default",
+            "notes_es": "Historial importado en memoria local.",
+        }
+        return validate_output_json(res)
     elif suffix == ".json":
         records = parse_draw_json(history_path)
+        import_draws_to_memory(records, db_path)
+        history = load_draw_history(db_path)
+        return validate_output_json(
+            {
+                "imported": len(records),
+                "history_count": len(history),
+                "memory_path": str(db_path),
+                "review_default": {
+                    "mode": "review_default",
+                    "notes_es": "Historial importado en memoria local.",
+                },
+            }
+        )
     else:
         raise ValueError("History file must be .csv or .json.")
-
-    import_draws_to_memory(records, db_path)
-    history = load_draw_history(db_path)
-    return validate_output_json(
-        {
-            "imported": len(records),
-            "history_count": len(history),
-            "memory_path": str(db_path),
-            "review_default": {
-                "mode": "review_default",
-                "notes_es": "Historial importado en memoria local.",
-            },
-        }
-    )
 
 
 def load_history_table(db_path: str | Path = DEFAULT_DB_PATH) -> list[dict[str, Any]]:
