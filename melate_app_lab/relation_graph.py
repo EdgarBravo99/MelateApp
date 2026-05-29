@@ -105,3 +105,87 @@ def export_relation_graph(graph: dict[str, object], output_path: str | Path) -> 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(graph, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
+
+
+def build_historical_relation_graph(
+    history: list[dict[str, object]],
+    window: int = 30,
+    game: str = "revancha",
+) -> dict[str, object]:
+    """Build a relation graph from the last *window* draws of *game* in history.
+
+    Returns a dict with mode="historical", nodes with frequency/degree data,
+    and edges with co-occurrence counts and draw evidence.
+    """
+    # Filter by game (case-insensitive) and take last N
+    filtered = [d for d in history if str(d.get("game", "")).casefold() == game.casefold()]
+    recent = filtered[-window:] if len(filtered) >= window else filtered
+
+    # --- gather per-number stats ---
+    from collections import Counter, defaultdict
+
+    frequency: Counter[int] = Counter()
+    number_draws: defaultdict[int, list[int]] = defaultdict(list)
+    pair_count: Counter[tuple[int, int]] = Counter()
+    pair_draws: defaultdict[tuple[int, int], list[int]] = defaultdict(list)
+
+    draw_ids_used: list[int] = []
+
+    for draw_record in recent:
+        draw_id = int(draw_record.get("draw", 0))
+        draw_ids_used.append(draw_id)
+        nums = sorted(draw_record.get("numbers", []))
+        for n in nums:
+            frequency[n] += 1
+            number_draws[n].append(draw_id)
+        for i in range(len(nums)):
+            for j in range(i + 1, len(nums)):
+                pair = (nums[i], nums[j])
+                pair_count[pair] += 1
+                pair_draws[pair].append(draw_id)
+
+    # --- build nodes ---
+    # Compute degree / weighted degree
+    degree: Counter[int] = Counter()
+    weighted_degree: Counter[int] = Counter()
+    for (a, b), cnt in pair_count.items():
+        degree[a] += 1
+        degree[b] += 1
+        weighted_degree[a] += cnt
+        weighted_degree[b] += cnt
+
+    nodes: list[dict[str, object]] = []
+    for number in sorted(frequency):
+        nodes.append({
+            "id": str(number),
+            "number": number,
+            "frequency": frequency[number],
+            "block": number_block(number),
+            "last_seen_draws": number_draws[number][-3:],
+            "degree": degree.get(number, 0),
+            "weighted_degree": weighted_degree.get(number, 0),
+        })
+
+    # --- build edges ---
+    edges: list[dict[str, object]] = []
+    for (a, b), cnt in pair_count.items():
+        edges.append({
+            "id": f"{a}-{b}",
+            "source": str(a),
+            "target": str(b),
+            "type": "historical_cooccurrence",
+            "count": cnt,
+            "draws": pair_draws[(a, b)],
+            "last_seen_draw": pair_draws[(a, b)][-1],
+        })
+
+    graph = {
+        "mode": "historical",
+        "game": game,
+        "window": window,
+        "draws_used": draw_ids_used,
+        "draws_count": len(recent),
+        "nodes": nodes,
+        "edges": edges,
+    }
+    return validate_output_json(graph)

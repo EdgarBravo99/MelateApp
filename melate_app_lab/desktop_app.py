@@ -537,6 +537,7 @@ def launch_desktop() -> int:
     refresh_history_button = QPushButton("Actualizar tabla")
     summarize_history_button = QPushButton("Resumen historico")
     dashboard_button = QPushButton("Generar Dashboard Visual")
+    historical_graph_button = QPushButton("Ver Grafo Historico")
     
     import_res_button.clicked.connect(start_import_csv_workflow)
     refresh_history_button.clicked.connect(lambda: run_action("Actualizar historial", refresh_history_table, False))
@@ -546,13 +547,17 @@ def launch_desktop() -> int:
     dashboard_button.clicked.connect(
         lambda: run_action("Generar Dashboard", lambda: controller.run_history_dashboard(DEFAULT_DB_PATH), False)
     )
+    historical_graph_button.clicked.connect(
+        lambda: run_action("Ver Grafo Historico", lambda: controller.run_historical_graph(DEFAULT_DB_PATH), True)
+    )
     history_actions.addWidget(import_res_button)
     history_actions.addWidget(refresh_history_button)
     history_actions.addWidget(summarize_history_button)
     history_actions.addWidget(dashboard_button)
+    history_actions.addWidget(historical_graph_button)
     history_actions.addStretch(1)
     
-    action_buttons.extend([import_res_button, refresh_history_button, summarize_history_button, dashboard_button])
+    action_buttons.extend([import_res_button, refresh_history_button, summarize_history_button, dashboard_button, historical_graph_button])
     
     history_layout.addLayout(history_actions)
     history_layout.addWidget(history_table, 1)

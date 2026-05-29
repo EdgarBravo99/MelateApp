@@ -251,11 +251,13 @@ def open_report(path: str | Path) -> dict[str, str]:
 def run_generate_candidates(db_path: str | Path = DEFAULT_DB_PATH, count: int = 10) -> dict[str, Any]:
     from .historical_store import load_draw_history
     from .candidate_generator import analyze_time_window, generate_candidates, format_candidates_report
+    from .relation_graph import build_historical_relation_graph
     history = load_draw_history(db_path)
     if not history:
         raise ValueError("No hay historial en la memoria para generar candidatos. Importa resultados primero.")
     analysis = analyze_time_window(history, window=30)
-    candidates = generate_candidates(analysis, count=count)
+    graph_data = build_historical_relation_graph(history, window=30, game="revancha")
+    candidates = generate_candidates(analysis, count=count, graph_data=graph_data)
     report_text = format_candidates_report(candidates)
     return validate_output_json({
         "candidates": candidates,
@@ -283,7 +285,29 @@ def run_graph_visualization(draw: int, result_text: str, played_text: str) -> di
         "html_path": str(html_path),
         "review_default": {
             "mode": "review_default",
-            "notes_es": f"Grafo de relaciones del sorteo {draw} generado y abierto."
+            "notes_es": f"Grafo postmortem del sorteo {draw} generado y abierto."
+        }
+    })
+
+
+def run_historical_graph(db_path: str | Path = DEFAULT_DB_PATH, window: int = 30) -> dict[str, Any]:
+    from .historical_store import load_draw_history
+    from .relation_graph import build_historical_relation_graph
+    from .report_writer import write_graph_html_report
+    history = load_draw_history(db_path)
+    if not history:
+        raise ValueError("No hay historial en la memoria para generar el grafo. Importa resultados primero.")
+    graph_data = build_historical_relation_graph(history, window=window, game="revancha")
+    html_path = Path("outputs") / "historical_graph.html"
+    write_graph_html_report(graph_data, html_path)
+    open_report(html_path)
+    return validate_output_json({
+        "html_path": str(html_path),
+        "history_count": len(history),
+        "window": window,
+        "review_default": {
+            "mode": "review_default",
+            "notes_es": f"Grafo historico de Revancha (ultimos {window} sorteos) generado y abierto."
         }
     })
 

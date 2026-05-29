@@ -43,7 +43,12 @@ def analyze_time_window(history: list[dict[str, Any]], window: int = 30) -> dict
         "recent_count": len(recent)
     }
 
-def generate_candidates(analysis: dict[str, Any], count: int = 10, seed: int = 4218) -> list[dict[str, Any]]:
+def generate_candidates(
+    analysis: dict[str, Any],
+    count: int = 10,
+    seed: int = 4218,
+    graph_data: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     rng = random.Random(seed)
     candidates: list[dict[str, Any]] = []
     
@@ -52,7 +57,22 @@ def generate_candidates(analysis: dict[str, Any], count: int = 10, seed: int = 4
     common_sigs = analysis["common_signatures"] or ["1-1-1-1-2", "1-1-1-2-1", "1-1-2-1-1", "1-2-1-1-1", "2-1-1-1-1"]
     common_bands = analysis["common_bands"] or ["mid_band", "high_band"]
     historical_sets = analysis["historical_sets"]
-    
+
+    # Build a lookup from graph_data edges for fast pair -> count / draws
+    edge_lookup: dict[tuple[int, int], dict[str, Any]] = {}
+    graph_window = 0
+    if graph_data and graph_data.get("mode") == "historical":
+        graph_window = graph_data.get("window", 0)
+        for edge in graph_data.get("edges", []):
+            src = int(edge["source"])
+            tgt = int(edge["target"])
+            pair = (min(src, tgt), max(src, tgt))
+            edge_lookup[pair] = {
+                "count": edge.get("count", 0),
+                "draws": edge.get("draws", []),
+                "last_seen_draw": edge.get("last_seen_draw", 0),
+            }
+
     # Sort numbers by frequency
     sorted_nums_by_freq = sorted(frequencies.keys(), key=lambda n: frequencies[n], reverse=True)
     hot_numbers = sorted_nums_by_freq[:18]
@@ -173,7 +193,32 @@ def generate_candidates(analysis: dict[str, Any], count: int = 10, seed: int = 4
                 f"suma total de {sum(ticket)} en rango {band}",
                 f"estructura de bloques {sig} no repetida recientemente"
             ]
-            
+
+        # --- Graph support evidence ---
+        pair_edges: list[dict[str, Any]] = []
+        graph_support_score = 0
+        evidence_draws: list[int] = []
+        strongest_pairs: list[str] = []
+
+        for i in range(6):
+            for j in range(i + 1, 6):
+                pair_key = (ticket[i], ticket[j])
+                if pair_key in edge_lookup:
+                    edge_info = edge_lookup[pair_key]
+                    pair_edges.append({
+                        "pair": f"{ticket[i]}—{ticket[j]}",
+                        "count": edge_info["count"],
+                        "draws": edge_info["draws"],
+                    })
+                    graph_support_score += edge_info["count"]
+                    evidence_draws.extend(edge_info["draws"])
+
+        # Deduplicate and sort evidence draws
+        evidence_draws = sorted(set(evidence_draws), reverse=True)[:5]
+        # Top 3 strongest pairs
+        pair_edges_sorted = sorted(pair_edges, key=lambda p: p["count"], reverse=True)
+        strongest_pairs = [p["pair"] for p in pair_edges_sorted[:3]]
+
         candidates.append({
             "numbers": ticket,
             "classification": classification,
@@ -181,7 +226,14 @@ def generate_candidates(analysis: dict[str, Any], count: int = 10, seed: int = 4
             "sum": sum(ticket),
             "sum_band": band,
             "block_signature": sig,
-            "review": review
+            "block_presence_signature": presence,
+            "review": review,
+            "pair_edges": pair_edges,
+            "graph_support_score": graph_support_score,
+            "relation_count": len(pair_edges),
+            "strongest_pairs": strongest_pairs,
+            "evidence_draws": evidence_draws,
+            "relation_window": graph_window,
         })
         
         if len(candidates) >= count:
@@ -192,13 +244,35 @@ def generate_candidates(analysis: dict[str, Any], count: int = 10, seed: int = 4
 
 def format_candidates_report(candidates: list[dict[str, Any]]) -> str:
     lines = []
-    lines.append("Tesis de revisión para siguiente ciclo\n")
+    lines.append("Tesis de revision para siguiente ciclo\n")
     for i, cand in enumerate(candidates):
         letter = chr(ord('A') + i)
         lines.append(f"Set {letter} — {cand['classification']}")
         lines.append(" ".join(str(n) for n in cand["numbers"]))
+
+        # Graph support section
+        pair_edges = cand.get("pair_edges", [])
+        score = cand.get("graph_support_score", 0)
+        window = cand.get("relation_window", 0)
+        if score > 0:
+            lines.append("")
+            lines.append("Soporte de grafo:")
+            lines.append(f"- graph_support_score: {score}")
+            if window:
+                lines.append(f"- ventana: ultimos {window} sorteos")
+            lines.append("- conexiones internas:")
+            for pe in pair_edges:
+                lines.append(f"  - {pe['pair']} observado {pe['count']} veces")
+            ev_draws = cand.get("evidence_draws", [])
+            if ev_draws:
+                lines.append("- evidencia en sorteos:")
+                for d in ev_draws:
+                    lines.append(f"  - {d}")
+
+        lines.append("")
         lines.append("Motivo:")
         for bullet in cand["reason_bullets"]:
             lines.append(f"- {bullet}")
         lines.append("")
     return "\n".join(lines)
+
