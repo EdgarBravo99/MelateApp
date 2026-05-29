@@ -166,6 +166,25 @@ def history_summary() -> None:
 
 
 @app.command()
+def theses(
+    count: Annotated[int, typer.Option()] = 10,
+    game: Annotated[str, typer.Option()] = "revancha",
+) -> None:
+    from .candidate_generator import analyze_time_window, generate_candidates, format_candidates_report
+    from .historical_store import load_draw_history
+    from .relation_graph import build_historical_relation_graph
+
+    history = load_draw_history(DEFAULT_DB_PATH)
+    if not history:
+        typer.echo("No hay historial en la memoria. Importa resultados primero.")
+        raise typer.Exit(1)
+    analysis = analyze_time_window(history, window=30)
+    graph_data = build_historical_relation_graph(history, window=30, game=game)
+    candidates = generate_candidates(analysis, count=count, graph_data=graph_data)
+    typer.echo(format_candidates_report(candidates))
+
+
+@app.command()
 def desktop() -> None:
     from .desktop_app import launch_desktop
 

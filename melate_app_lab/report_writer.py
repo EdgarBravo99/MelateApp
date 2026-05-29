@@ -247,8 +247,16 @@ def write_csv_summary(report: dict[str, Any], output_path: str | Path) -> Path:
 
 def write_graph_html_report(graph_data: dict[str, Any], output_path: str | Path) -> Path:
     validate_output_json(graph_data)
+    mode = graph_data.get("mode", "postmortem")
+
+    if mode == "historical":
+        return _write_historical_graph_html(graph_data, output_path)
+    return _write_postmortem_graph_html(graph_data, output_path)
+
+
+def _write_postmortem_graph_html(graph_data: dict[str, Any], output_path: str | Path) -> Path:
     draw = graph_data["metadata"]["draw"]
-    
+
     nodes_js = []
     for node in graph_data["nodes"]:
         nodes_js.append({
@@ -260,7 +268,7 @@ def write_graph_html_report(graph_data: dict[str, Any], output_path: str | Path)
                 "label": str(node["number"])
             }
         })
-        
+
     edges_js = []
     for edge in graph_data["edges"]:
         edges_js.append({
@@ -278,7 +286,7 @@ def write_graph_html_report(graph_data: dict[str, Any], output_path: str | Path)
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Grafo de Relaciones | Sorteo {draw}</title>
+  <title>Grafo postmortem | Sorteo {draw}</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.29.2/cytoscape.min.js"></script>
   <style>
     :root {{
@@ -359,7 +367,7 @@ def write_graph_html_report(graph_data: dict[str, Any], output_path: str | Path)
     .badge-played {{ background: rgba(59, 130, 246, 0.2); color: #3b82f6; border: 1px solid rgba(59, 130, 246, 0.4); }}
     .badge-captured {{ background: rgba(139, 92, 246, 0.2); color: #8b5cf6; border: 1px solid rgba(139, 92, 246, 0.4); }}
     .badge-missed {{ background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.4); }}
-    
+
     .legend-item {{
       display: flex;
       align-items: center;
@@ -381,7 +389,7 @@ def write_graph_html_report(graph_data: dict[str, Any], output_path: str | Path)
 <body>
   <header>
     <div>
-      <h1>Grafo de Relaciones Estructurales | Sorteo <span>{draw}</span></h1>
+      <h1>Grafo postmortem | Sorteo <span>{draw}</span></h1>
       <div class="subtitle">Visualizacion interactiva de conexiones entre boletos jugados y resultados</div>
     </div>
   </header>
@@ -394,7 +402,7 @@ def write_graph_html_report(graph_data: dict[str, Any], output_path: str | Path)
           <p style="color: var(--text-muted); font-style: italic;">Haz clic en un numero o una conexion para ver sus detalles analiticos.</p>
         </div>
       </div>
-      
+
       <div class="panel-section">
         <h2>Leyenda de Nodos</h2>
         <div class="legend-item">
@@ -562,19 +570,19 @@ def write_graph_html_report(graph_data: dict[str, Any], output_path: str | Path)
     cy.on('tap', function(evt) {{
       const target = evt.target;
       const detailsDiv = document.getElementById('details-content');
-      
+
       if (target === cy) {{
         detailsDiv.innerHTML = '<p style="color: var(--text-muted); font-style: italic;">Haz clic en un numero o una conexion para ver sus detalles analiticos.</p>';
         return;
       }}
-      
+
       if (target.isNode()) {{
         const num = target.data('number');
         const block = target.data('block');
         const roles = target.data('roles') || [];
-        
+
         let badgesHtml = roles.map(r => `<span class="badge badge-${{r}}">${{r}}</span>`).join(' ');
-        
+
         detailsDiv.innerHTML = `
           <div class="detail-item">
             <div class="detail-label">Elemento</div>
@@ -595,7 +603,7 @@ def write_graph_html_report(graph_data: dict[str, Any], output_path: str | Path)
         const evidence = target.data('evidence');
         const sourceNum = cy.getElementById(target.data('source')).data('number');
         const targetNum = cy.getElementById(target.data('target')).data('number');
-        
+
         detailsDiv.innerHTML = `
           <div class="detail-item">
             <div class="detail-label">Conexion</div>
@@ -616,6 +624,350 @@ def write_graph_html_report(graph_data: dict[str, Any], output_path: str | Path)
         `;
       }}
     }});
+  </script>
+</body>
+</html>
+"""
+    validate_text(html_content)
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(html_content, encoding="utf-8")
+    return path
+
+
+def _write_historical_graph_html(graph_data: dict[str, Any], output_path: str | Path) -> Path:
+    game = html.escape(str(graph_data.get("game", "revancha")))
+    window = graph_data.get("window", 30)
+    draws_count = graph_data.get("draws_count", 0)
+
+    nodes = graph_data.get("nodes", [])
+    edges = graph_data.get("edges", [])
+
+    # Build Cytoscape elements
+    max_freq = max((n.get("frequency", 1) for n in nodes), default=1)
+    nodes_js = []
+    for node in nodes:
+        freq = node.get("frequency", 1)
+        size = 24 + int(20 * freq / max(max_freq, 1))
+        nodes_js.append({
+            "data": {
+                "id": str(node["number"]),
+                "number": node["number"],
+                "block": node.get("block", ""),
+                "frequency": freq,
+                "degree": node.get("degree", 0),
+                "weighted_degree": node.get("weighted_degree", 0),
+                "last_seen_draws": node.get("last_seen_draws", []),
+                "label": str(node["number"]),
+                "size": size,
+            }
+        })
+
+    max_count = max((e.get("count", 1) for e in edges), default=1)
+    edges_js = []
+    for edge in edges:
+        cnt = edge.get("count", 1)
+        width = 1 + int(5 * cnt / max(max_count, 1))
+        edges_js.append({
+            "data": {
+                "source": str(edge["source"]),
+                "target": str(edge["target"]),
+                "count": cnt,
+                "draws": edge.get("draws", []),
+                "last_seen_draw": edge.get("last_seen_draw", 0),
+                "width": width,
+            }
+        })
+
+    # Build fallback tables
+    nodes_sorted = sorted(nodes, key=lambda n: n.get("frequency", 0), reverse=True)
+    fallback_nodes_rows = "\n".join(
+        f"<tr><td>{html.escape(str(n['number']))}</td>"
+        f"<td>{html.escape(str(n.get('frequency', 0)))}</td>"
+        f"<td>{html.escape(str(n.get('block', '')))}</td>"
+        f"<td>{html.escape(str(n.get('degree', 0)))}</td>"
+        f"<td>{html.escape(str(n.get('weighted_degree', 0)))}</td></tr>"
+        for n in nodes_sorted[:30]
+    )
+    edges_sorted = sorted(edges, key=lambda e: e.get("count", 0), reverse=True)
+    fallback_edges_rows = "\n".join(
+        f"<tr><td>{html.escape(str(e['source']))}—{html.escape(str(e['target']))}</td>"
+        f"<td>{html.escape(str(e.get('count', 0)))}</td>"
+        f"<td>{html.escape(str(e.get('last_seen_draw', '')))}</td>"
+        f"<td>{html.escape(str(e.get('draws', [])[:3]))}</td></tr>"
+        for e in edges_sorted[:30]
+    )
+
+    html_content = f"""<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Grafo historico de Revancha | MelateApp Lab</title>
+  <style>
+    :root {{
+      --bg: #0b0f19;
+      --panel: #111827;
+      --panel-border: #1f2937;
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --accent: #f59e0b;
+      --accent2: #10b981;
+      --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }}
+    header {{
+      background: var(--panel);
+      border-bottom: 1px solid var(--panel-border);
+      padding: 16px 24px;
+      z-index: 10;
+    }}
+    h1 {{ margin: 0; font-size: 1.5rem; font-weight: 600; color: #fff; }}
+    h1 span {{ color: var(--accent); }}
+    .subtitle {{ font-size: 0.875rem; color: var(--text-muted); margin-top: 4px; }}
+    .layout {{
+      display: flex;
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }}
+    #cy {{
+      flex: 1;
+      height: 100%;
+      background: #0f172a;
+    }}
+    #sidebar {{
+      width: 380px;
+      background: var(--panel);
+      border-left: 1px solid var(--panel-border);
+      padding: 24px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }}
+    .panel-section {{
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      padding: 16px;
+    }}
+    h2 {{ margin: 0 0 12px 0; font-size: 1rem; font-weight: 600; color: #fff; border-bottom: 1px solid var(--panel-border); padding-bottom: 8px; }}
+    .detail-item {{ margin-bottom: 12px; }}
+    .detail-item:last-child {{ margin-bottom: 0; }}
+    .detail-label {{ font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }}
+    .detail-value {{ font-size: 0.95rem; margin-top: 4px; font-weight: 500; }}
+    .badge {{
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-right: 6px;
+      margin-top: 6px;
+      background: rgba(245, 158, 11, 0.2);
+      color: #f59e0b;
+      border: 1px solid rgba(245, 158, 11, 0.4);
+    }}
+    #fallback {{ display: none; padding: 24px; overflow-y: auto; }}
+    #fallback table {{ width: 100%; border-collapse: collapse; margin-bottom: 24px; }}
+    #fallback th, #fallback td {{ padding: 8px 12px; border: 1px solid var(--panel-border); text-align: left; font-size: 0.85rem; }}
+    #fallback th {{ background: var(--panel); color: var(--accent); }}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Grafo historico de Revancha | <span>ultimos {window} sorteos</span></h1>
+    <div class="subtitle">Coapariciones historicas entre numeros — {draws_count} sorteos analizados del juego {game}</div>
+  </header>
+  <div class="layout">
+    <div id="cy"></div>
+    <div id="sidebar">
+      <div class="panel-section">
+        <h2>Detalle de Seleccion</h2>
+        <div id="details-content">
+          <p style="color: var(--text-muted); font-style: italic;">Haz clic en un numero o una conexion para ver detalles de coaparicion historica.</p>
+        </div>
+      </div>
+      <div class="panel-section">
+        <h2>Leyenda</h2>
+        <div style="font-size:0.85rem; margin-bottom:8px;">
+          <strong style="color:var(--accent);">Nodo grande</strong> = alta frecuencia en ventana
+        </div>
+        <div style="font-size:0.85rem; margin-bottom:8px;">
+          <strong style="color:var(--accent2);">Arista gruesa</strong> = coaparicion frecuente
+        </div>
+        <div style="font-size:0.85rem;">
+          Ventana: ultimos <strong>{window}</strong> sorteos
+        </div>
+      </div>
+    </div>
+    <div id="fallback">
+      <h2>Fallback: Tabla de Nodos (top 30 por frecuencia)</h2>
+      <table>
+        <tr><th>Numero</th><th>Frecuencia</th><th>Bloque</th><th>Degree</th><th>W. Degree</th></tr>
+        {fallback_nodes_rows}
+      </table>
+      <h2>Fallback: Tabla de Aristas (top 30 por coapariciones)</h2>
+      <table>
+        <tr><th>Par</th><th>Coapariciones</th><th>Ultima vez</th><th>Sorteos</th></tr>
+        {fallback_edges_rows}
+      </table>
+      <p style="color:var(--text-muted);">Ventana historica: ultimos {window} sorteos — {draws_count} sorteos de {game}</p>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.29.2/cytoscape.min.js"></script>
+  <script>
+    if (typeof cytoscape === 'undefined') {{
+      document.getElementById('cy').style.display = 'none';
+      document.getElementById('sidebar').style.display = 'none';
+      document.getElementById('fallback').style.display = 'block';
+    }} else {{
+      const elements = {{
+        nodes: {json.dumps(nodes_js)},
+        edges: {json.dumps(edges_js)}
+      }};
+
+      const cy = cytoscape({{
+        container: document.getElementById('cy'),
+        elements: [
+          ...elements.nodes,
+          ...elements.edges
+        ],
+        style: [
+          {{
+            selector: 'node',
+            style: {{
+              'label': 'data(label)',
+              'color': '#fff',
+              'font-size': '11px',
+              'font-weight': 'bold',
+              'text-valign': 'center',
+              'text-halign': 'center',
+              'background-color': '#f59e0b',
+              'width': 'data(size)',
+              'height': 'data(size)',
+              'border-width': '2px',
+              'border-color': '#92400e'
+            }}
+          }},
+          {{
+            selector: 'edge',
+            style: {{
+              'width': 'data(width)',
+              'line-color': '#10b981',
+              'target-arrow-shape': 'none',
+              'curve-style': 'bezier',
+              'opacity': 0.5
+            }}
+          }},
+          {{
+            selector: 'node:selected',
+            style: {{
+              'border-width': '4px',
+              'border-color': '#fbbf24'
+            }}
+          }},
+          {{
+            selector: 'edge:selected',
+            style: {{
+              'line-color': '#fbbf24',
+              'opacity': 1.0
+            }}
+          }}
+        ],
+        layout: {{
+          name: 'cose',
+          nodeRepulsion: function( node ){{ return 4096; }},
+          idealEdgeLength: function( edge ){{ return 80; }},
+          animate: true,
+          fit: true,
+          padding: 40
+        }}
+      }});
+
+      cy.on('tap', function(evt) {{
+        const target = evt.target;
+        const detailsDiv = document.getElementById('details-content');
+
+        if (target === cy) {{
+          detailsDiv.innerHTML = '<p style="color: var(--text-muted); font-style: italic;">Haz clic en un numero o una conexion para ver detalles de coaparicion historica.</p>';
+          return;
+        }}
+
+        if (target.isNode()) {{
+          const num = target.data('number');
+          const block = target.data('block');
+          const freq = target.data('frequency');
+          const deg = target.data('degree');
+          const wdeg = target.data('weighted_degree');
+          const lastSeen = target.data('last_seen_draws') || [];
+
+          detailsDiv.innerHTML = `
+            <div class="detail-item">
+              <div class="detail-label">Numero</div>
+              <div class="detail-value" style="font-size: 1.25rem; font-weight: bold; color: var(--accent);">${{num}}</div>
+            </div>
+            <div class="detail-item">
+              <div class="detail-label">Frecuencia en ventana</div>
+              <div class="detail-value">${{freq}} apariciones</div>
+            </div>
+            <div class="detail-item">
+              <div class="detail-label">Bloque</div>
+              <div class="detail-value"><code>${{block}}</code></div>
+            </div>
+            <div class="detail-item">
+              <div class="detail-label">Degree (conexiones unicas)</div>
+              <div class="detail-value">${{deg}}</div>
+            </div>
+            <div class="detail-item">
+              <div class="detail-label">Weighted Degree (coapariciones totales)</div>
+              <div class="detail-value">${{wdeg}}</div>
+            </div>
+            <div class="detail-item">
+              <div class="detail-label">Ultimas apariciones</div>
+              <div class="detail-value">${{lastSeen.join(', ') || '-'}}</div>
+            </div>
+          `;
+        }} else if (target.isEdge()) {{
+          const src = target.data('source');
+          const tgt = target.data('target');
+          const cnt = target.data('count');
+          const draws = target.data('draws') || [];
+          const lastSeen = target.data('last_seen_draw');
+
+          detailsDiv.innerHTML = `
+            <div class="detail-item">
+              <div class="detail-label">Par</div>
+              <div class="detail-value" style="font-weight: bold;">${{src}} &harr; ${{tgt}}</div>
+            </div>
+            <div class="detail-item">
+              <div class="detail-label">Coapariciones historicas</div>
+              <div class="detail-value" style="color: var(--accent);">${{cnt}} veces</div>
+            </div>
+            <div class="detail-item">
+              <div class="detail-label">Ultimo sorteo con el par</div>
+              <div class="detail-value">${{lastSeen}}</div>
+            </div>
+            <div class="detail-item">
+              <div class="detail-label">Sorteos donde aparecio el par</div>
+              <div class="detail-value" style="font-size: 0.85rem;">${{draws.join(', ')}}</div>
+            </div>
+          `;
+        }}
+      }});
+    }}
   </script>
 </body>
 </html>
