@@ -279,6 +279,37 @@ def backtest_cmd(
     open_report(res["html_path"])
 
 
+@app.command("workflow-loop")
+def workflow_loop(
+    draw: Annotated[int, typer.Option()],
+    game: Annotated[str, typer.Option()] = "revancha",
+    pool_size: Annotated[int, typer.Option()] = 100,
+    seed: Annotated[int, typer.Option()] = 42,
+    played: Annotated[str | None, typer.Option()] = None,
+    result: Annotated[str | None, typer.Option()] = None,
+) -> None:
+    from .workflow_loop import run_unified_workflow
+
+    played_indices = None
+    if played is not None:
+        played_indices = [int(x) for x in played.replace(",", " ").split()]
+
+    result_numbers = None
+    if result is not None:
+        result_numbers = parse_numbers(result)
+
+    res = run_unified_workflow(
+        db_path=DEFAULT_DB_PATH,
+        draw=draw,
+        game=game,
+        pool_size=pool_size,
+        seed=seed,
+        played_indices=played_indices,
+        result_numbers=result_numbers,
+    )
+    _json(res)
+
+
 @app.command()
 def desktop() -> None:
     from .desktop_app import launch_desktop

@@ -68,3 +68,45 @@ def test_review_all_command_runs(tmp_path, monkeypatch):
     assert '"portfolio_id"' in result.output
     assert '"next_draw": 102' in result.output
 
+
+def test_workflow_loop_command_runs(tmp_path, monkeypatch):
+    import melate_app_lab.cli as cli
+    from melate_app_lab.historical_store import import_draws_to_memory
+
+    db_path = tmp_path / "data" / "memory.sqlite"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(cli, "DEFAULT_DB_PATH", db_path)
+
+    dummy_history = [
+        {"draw": 100, "numbers": [1, 2, 3, 4, 5, 6], "sum": 21, "sum_band": "low_band", "block_signature": "6-0-0-0-0", "block_presence_signature": "1-0-0-0-0", "game": "revancha", "date": "2026-05-29"},
+        {"draw": 101, "numbers": [1, 2, 3, 4, 5, 7], "sum": 22, "sum_band": "low_band", "block_signature": "6-0-0-0-0", "block_presence_signature": "1-0-0-0-0", "game": "revancha", "date": "2026-05-29"},
+    ]
+    import_draws_to_memory(dummy_history, db_path)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "workflow-loop",
+            "--draw",
+            "102",
+            "--game",
+            "revancha",
+            "--pool-size",
+            "10",
+            "--seed",
+            "42",
+            "--played",
+            "0 2",
+            "--result",
+            "1 2 3 4 5 8",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "portfolio_id" in result.output
+    assert "coverage" in result.output
+    assert "played_count" in result.output
+    assert "evaluation" in result.output
+
+
