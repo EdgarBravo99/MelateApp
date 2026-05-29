@@ -481,6 +481,7 @@ def run_backtest_lab(
     top_k: int = 10,
     seed: int = 42,
     use_ml: bool = False,
+    log_fn: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     from .historical_store import load_draw_history
     from .backtest_lab import run_backtest
@@ -508,6 +509,7 @@ def run_backtest_lab(
         seed=seed,
         game=game,
         use_ml=use_ml,
+        log_fn=log_fn,
     )
 
     html_path = Path("outputs") / "backtest_report.html"
