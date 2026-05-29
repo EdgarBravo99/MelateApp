@@ -8,7 +8,9 @@ from typing import Any
 from .guardrails import validate_output_json
 
 
-DEFAULT_DB_PATH = Path("data/melate_app_memory.sqlite")
+from .paths import default_memory_path
+
+DEFAULT_DB_PATH = default_memory_path()
 
 
 def _connect(db_path: str | Path) -> sqlite3.Connection:
@@ -79,6 +81,8 @@ def init_db(db_path: str | Path = DEFAULT_DB_PATH) -> None:
             )
             """
         )
+        from .historical_store import ensure_schema
+        ensure_schema(conn)
 
 
 def remember_draw(db_path: str | Path, draw_trace: dict[str, Any]) -> None:

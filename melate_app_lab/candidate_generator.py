@@ -1,0 +1,204 @@
+from __future__ import annotations
+
+import random
+from collections import Counter
+from typing import Any, Iterable
+from .number_utils import block_signature, block_presence_signature, sum_band, parse_numbers
+from .montecarlo_stress import stress_review
+
+def analyze_time_window(history: list[dict[str, Any]], window: int = 30) -> dict[str, Any]:
+    # Extract last 'window' draws
+    recent = history[-window:] if len(history) >= window else history
+    
+    # 1. Frequency of each number
+    all_numbers = [num for draw in recent for num in draw.get("numbers", [])]
+    frequencies = Counter(all_numbers)
+    # Ensure all numbers 1-56 are present in the frequency dict
+    for i in range(1, 57):
+        if i not in frequencies:
+            frequencies[i] = 0
+            
+    # 2. Co-occurrences (pairs)
+    co_occurrences: dict[tuple[int, int], int] = {}
+    for draw in recent:
+        nums = sorted(draw.get("numbers", []))
+        for i in range(len(nums)):
+            for j in range(i + 1, len(nums)):
+                pair = (nums[i], nums[j])
+                co_occurrences[pair] = co_occurrences.get(pair, 0) + 1
+
+    # 3. Common block signatures and sum bands
+    signatures = Counter(draw.get("block_signature") for draw in recent if draw.get("block_signature"))
+    sum_bands = Counter(draw.get("sum_band") for draw in recent if draw.get("sum_band"))
+    
+    # Historical sets to avoid duplicates
+    historical_sets = {frozenset(draw.get("numbers", [])) for draw in history}
+    
+    return {
+        "frequencies": dict(frequencies),
+        "co_occurrences": co_occurrences,
+        "common_signatures": [sig for sig, _ in signatures.most_common(5)],
+        "common_bands": [band for band, _ in sum_bands.most_common(3)],
+        "historical_sets": historical_sets,
+        "recent_count": len(recent)
+    }
+
+def generate_candidates(analysis: dict[str, Any], count: int = 10, seed: int = 4218) -> list[dict[str, Any]]:
+    rng = random.Random(seed)
+    candidates: list[dict[str, Any]] = []
+    
+    frequencies = analysis["frequencies"]
+    co_occurrences = analysis["co_occurrences"]
+    common_sigs = analysis["common_signatures"] or ["1-1-1-1-2", "1-1-1-2-1", "1-1-2-1-1", "1-2-1-1-1", "2-1-1-1-1"]
+    common_bands = analysis["common_bands"] or ["mid_band", "high_band"]
+    historical_sets = analysis["historical_sets"]
+    
+    # Sort numbers by frequency
+    sorted_nums_by_freq = sorted(frequencies.keys(), key=lambda n: frequencies[n], reverse=True)
+    hot_numbers = sorted_nums_by_freq[:18]
+    cold_numbers = sorted_nums_by_freq[-18:]
+    warm_numbers = [n for n in sorted_nums_by_freq if n not in hot_numbers and n not in cold_numbers]
+    
+    # Generate 1000 candidate pools and filter them
+    pool: list[list[int]] = []
+    for _ in range(1000):
+        # Pick strategy randomly to diversify
+        strat = rng.choice(["balance", "relation", "cadence"])
+        ticket: list[int] = []
+        if strat == "balance":
+            # Select 1 number from each block to maximize coverage, then 1 extra
+            # blocks definitions: 1_10 (1-10), 11_20 (11-20), 21_30 (21-30), 31_40 (31-40), 41_56 (41-56)
+            blocks_ranges = [(1, 10), (11, 20), (21, 30), (31, 40), (41, 56)]
+            for r in blocks_ranges:
+                ticket.append(rng.randint(r[0], r[1]))
+            # 6th number from 1-56 not already selected
+            while len(ticket) < 6:
+                val = rng.randint(1, 56)
+                if val not in ticket:
+                    ticket.append(val)
+        elif strat == "relation":
+            # Start with a top co-occurring pair in recent history
+            if co_occurrences:
+                top_pairs = sorted(co_occurrences.keys(), key=lambda p: co_occurrences[p], reverse=True)
+                pair = rng.choice(top_pairs[:min(10, len(top_pairs))])
+                ticket.extend(pair)
+            else:
+                ticket.extend(rng.sample(range(1, 57), 2))
+            # Fill remaining with warm and hot numbers
+            while len(ticket) < 6:
+                val = rng.choice(hot_numbers + warm_numbers)
+                if val not in ticket:
+                    ticket.append(val)
+        else: # cadence
+            # Mix hot, cold, and warm numbers
+            ticket.extend(rng.sample(hot_numbers, 2))
+            ticket.extend(rng.sample(warm_numbers, 2))
+            ticket.extend(rng.sample(cold_numbers, 2))
+            
+        ticket = sorted(ticket)
+        
+        # Validations
+        if len(set(ticket)) != 6:
+            continue
+        if frozenset(ticket) in historical_sets:
+            continue
+            
+        # Stress-review validation (pre-filtering sums and signatures)
+        tot = sum(ticket)
+        band = sum_band(tot)
+        sig = block_signature(ticket)
+        
+        # We prefer common sum bands and common signatures
+        if band not in common_bands and rng.random() > 0.3:
+            continue
+        if sig not in common_sigs and rng.random() > 0.3:
+            continue
+            
+        pool.append(ticket)
+        
+    # Deduplicate pool
+    unique_pool = []
+    seen = set()
+    for ticket in pool:
+        tup = tuple(ticket)
+        if tup not in seen:
+            seen.add(tup)
+            unique_pool.append(ticket)
+            
+    # Now run stress_review on unique pool and select the best ones
+    for ticket in unique_pool:
+        # Run a mini stress review
+        review = stress_review(ticket, [])
+        # Score the ticket based on block presence, sum band, and how well it matches the strategies
+        sig = block_signature(ticket)
+        presence = block_presence_signature(ticket)
+        band = sum_band(sum(ticket))
+        
+        # Determine the best strategy classification
+        presence_count = presence.count("1")
+        
+        # Calculate how many co-occurrences it matches
+        match_pairs = 0
+        for i in range(6):
+            for j in range(i + 1, 6):
+                if (ticket[i], ticket[j]) in co_occurrences:
+                    match_pairs += co_occurrences[(ticket[i], ticket[j])]
+                    
+        # Check hot/cold mix
+        hot_count = sum(1 for n in ticket if n in hot_numbers)
+        cold_count = sum(1 for n in ticket if n in cold_numbers)
+        
+        classification = ""
+        reason_bullets = []
+        
+        if presence_count >= 5:
+            classification = "Balance por bloques"
+            reason_bullets = [
+                f"cubre {presence_count} bloques de {len(presence.split('-'))} definidos",
+                f"suma dentro de banda {band} ({sum(ticket)})",
+                "evita concentracion excesiva de anclas",
+                f"mantiene diversidad de firma ({sig})"
+            ]
+        elif match_pairs >= 2:
+            classification = "Relacion historica moderada"
+            reason_bullets = [
+                f"conserva {match_pairs} conexiones observadas en la ventana",
+                f"mezcla numeros de alta ({hot_count}) y baja ({cold_count}) recurrencia",
+                f"firma coincide con zona de exito historico ({sig})"
+            ]
+        else:
+            classification = "Cadencia y Ciclos"
+            reason_bullets = [
+                f"balance temporal optimo: {hot_count} calientes, {cold_count} frios",
+                f"suma total de {sum(ticket)} en rango {band}",
+                f"estructura de bloques {sig} no repetida recientemente"
+            ]
+            
+        candidates.append({
+            "numbers": ticket,
+            "classification": classification,
+            "reason_bullets": reason_bullets,
+            "sum": sum(ticket),
+            "sum_band": band,
+            "block_signature": sig,
+            "review": review
+        })
+        
+        if len(candidates) >= count:
+            break
+            
+    # Sort candidates so we return exactly the requested count, or pad if we didn't get enough
+    return candidates[:count]
+
+def format_candidates_report(candidates: list[dict[str, Any]]) -> str:
+    lines = []
+    lines.append("Tesis de revisión para siguiente ciclo\n")
+    for i, cand in enumerate(candidates):
+        letter = chr(ord('A') + i)
+        lines.append(f"Set {letter} — {cand['classification']}")
+        lines.append(" ".join(str(n) for n in cand["numbers"]))
+        lines.append("Motivo:")
+        for bullet in cand["reason_bullets"]:
+            lines.append(f"- {bullet}")
+        lines.append("")
+    return "\n".join(lines)

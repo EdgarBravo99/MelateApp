@@ -247,3 +247,62 @@ def open_report(path: str | Path) -> dict[str, str]:
         webbrowser.open(report_path.resolve().as_uri())
     return {"opened": str(report_path)}
 
+
+def run_generate_candidates(db_path: str | Path = DEFAULT_DB_PATH, count: int = 10) -> dict[str, Any]:
+    from .historical_store import load_draw_history
+    from .candidate_generator import analyze_time_window, generate_candidates, format_candidates_report
+    history = load_draw_history(db_path)
+    if not history:
+        raise ValueError("No hay historial en la memoria para generar candidatos. Importa resultados primero.")
+    analysis = analyze_time_window(history, window=30)
+    candidates = generate_candidates(analysis, count=count)
+    report_text = format_candidates_report(candidates)
+    return validate_output_json({
+        "candidates": candidates,
+        "report_text": report_text,
+        "history_count": len(history),
+        "review_default": {
+            "mode": "review_default",
+            "notes_es": "Tesis y combinaciones candidatas generadas con exito."
+        }
+    })
+
+
+def run_graph_visualization(draw: int, result_text: str, played_text: str) -> dict[str, Any]:
+    from .relation_graph import build_relation_graph
+    from .report_writer import write_graph_html_report
+    # parse input strings first
+    result_numbers = parse_numbers(result_text)
+    tickets = parse_played_tickets_flexible(played_text)
+    graph = build_relation_graph(draw, result_numbers, tickets)
+    html_path = Path("outputs") / f"relation_graph_{draw}.html"
+    write_graph_html_report(graph, html_path)
+    open_report(html_path)
+    return validate_output_json({
+        "draw": int(draw),
+        "html_path": str(html_path),
+        "review_default": {
+            "mode": "review_default",
+            "notes_es": f"Grafo de relaciones del sorteo {draw} generado y abierto."
+        }
+    })
+
+
+def run_history_dashboard(db_path: str | Path = DEFAULT_DB_PATH) -> dict[str, Any]:
+    from .historical_store import load_draw_history
+    from .report_writer import write_history_dashboard_html
+    history = load_draw_history(db_path)
+    if not history:
+        raise ValueError("No hay historial en la memoria para generar el dashboard. Importa resultados primero.")
+    html_path = Path("outputs") / "history_dashboard.html"
+    write_history_dashboard_html(history, html_path)
+    open_report(html_path)
+    return validate_output_json({
+        "html_path": str(html_path),
+        "history_count": len(history),
+        "review_default": {
+            "mode": "review_default",
+            "notes_es": "Dashboard historico generado y abierto."
+        }
+    })
+

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .historical_store import (
-    _ensure_schema,
+    ensure_schema,
     get_latest_draw,
     insert_draw_record,
     load_draw_history,
@@ -104,7 +104,7 @@ def import_resultados_csv_to_memory(
     encoding_used = _get_encoding(path)
 
     try:
-        _ensure_schema(connection)
+        ensure_schema(connection)
         
         connection.execute("BEGIN TRANSACTION")
 

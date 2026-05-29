@@ -243,3 +243,626 @@ def write_csv_summary(report: dict[str, Any], output_path: str | Path) -> Path:
             }
         )
     return path
+
+
+def write_graph_html_report(graph_data: dict[str, Any], output_path: str | Path) -> Path:
+    validate_output_json(graph_data)
+    draw = graph_data["metadata"]["draw"]
+    
+    nodes_js = []
+    for node in graph_data["nodes"]:
+        nodes_js.append({
+            "data": {
+                "id": node["id"],
+                "number": node["number"],
+                "block": node["block"],
+                "roles": node["roles"],
+                "label": str(node["number"])
+            }
+        })
+        
+    edges_js = []
+    for edge in graph_data["edges"]:
+        edges_js.append({
+            "data": {
+                "source": edge["source"],
+                "target": edge["target"],
+                "type": edge["type"],
+                "severity": edge["severity"],
+                "evidence": edge.get("evidence_es", "")
+            }
+        })
+
+    html_content = f"""<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Grafo de Relaciones | Sorteo {draw}</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.29.2/cytoscape.min.js"></script>
+  <style>
+    :root {{
+      --bg: #0b0f19;
+      --panel: #111827;
+      --panel-border: #1f2937;
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --accent: #10b981;
+      --accent-glow: rgba(16, 185, 129, 0.2);
+      --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }}
+    header {{
+      background: var(--panel);
+      border-bottom: 1px solid var(--panel-border);
+      padding: 16px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 10;
+    }}
+    h1 {{ margin: 0; font-size: 1.5rem; font-weight: 600; color: #fff; }}
+    h1 span {{ color: var(--accent); }}
+    .subtitle {{ font-size: 0.875rem; color: var(--text-muted); margin-top: 4px; }}
+    .layout {{
+      display: flex;
+      flex: 1;
+      position: relative;
+    }}
+    #cy {{
+      flex: 1;
+      height: 100%;
+      background: #0f172a;
+    }}
+    #sidebar {{
+      width: 360px;
+      background: var(--panel);
+      border-left: 1px solid var(--panel-border);
+      padding: 24px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }}
+    .panel-section {{
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      padding: 16px;
+    }}
+    h2 {{ margin: 0 0 12px 0; font-size: 1rem; font-weight: 600; color: #fff; border-bottom: 1px solid var(--panel-border); padding-bottom: 8px; }}
+    .detail-item {{ margin-bottom: 12px; }}
+    .detail-item:last-child {{ margin-bottom: 0; }}
+    .detail-label {{ font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }}
+    .detail-value {{ font-size: 0.95rem; margin-top: 4px; font-weight: 500; }}
+    .badge {{
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      margin-right: 6px;
+      margin-top: 6px;
+    }}
+    .badge-result {{ background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4); }}
+    .badge-played {{ background: rgba(59, 130, 246, 0.2); color: #3b82f6; border: 1px solid rgba(59, 130, 246, 0.4); }}
+    .badge-captured {{ background: rgba(139, 92, 246, 0.2); color: #8b5cf6; border: 1px solid rgba(139, 92, 246, 0.4); }}
+    .badge-missed {{ background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.4); }}
+    
+    .legend-item {{
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+      font-size: 0.85rem;
+    }}
+    .legend-color {{
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+    }}
+    .legend-line {{
+      width: 24px;
+      height: 3px;
+    }}
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Grafo de Relaciones Estructurales | Sorteo <span>{draw}</span></h1>
+      <div class="subtitle">Visualizacion interactiva de conexiones entre boletos jugados y resultados</div>
+    </div>
+  </header>
+  <div class="layout">
+    <div id="cy"></div>
+    <div id="sidebar">
+      <div class="panel-section">
+        <h2>Detalles de Seleccion</h2>
+        <div id="details-content">
+          <p style="color: var(--text-muted); font-style: italic;">Haz clic en un numero o una conexion para ver sus detalles analiticos.</p>
+        </div>
+      </div>
+      
+      <div class="panel-section">
+        <h2>Leyenda de Nodos</h2>
+        <div class="legend-item">
+          <div class="legend-color" style="background: #10b981; border: 1px solid #059669;"></div>
+          <span>Numero del Resultado (Sorteado)</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color" style="background: #3b82f6; border: 1px solid #2563eb;"></div>
+          <span>Numero Jugado (No sorteado)</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color" style="background: #8b5cf6; border: 1px solid #7c3aed;"></div>
+          <span>Numero Capturado (Acierto)</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color" style="background: #ef4444; border: 1px solid #dc2626;"></div>
+          <span>Numero No Capturado (Fallo)</span>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <h2>Leyenda de Conexiones</h2>
+        <div class="legend-item">
+          <div class="legend-line" style="background: #10b981;"></div>
+          <span>same_draw (Aparece en el sorteo)</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-line" style="background: #8b5cf6; height: 1px; border-bottom: 2px dashed #8b5cf6;"></div>
+          <span>missed_from_played_set (Fallo de cobertura)</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-line" style="background: #3b82f6;"></div>
+          <span>captured_together (Aciertos conectados)</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-line" style="background: #4b5563; height: 1px; border-bottom: 1px dotted #4b5563;"></div>
+          <span>same_block (Mismo bloque)</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const elements = {{
+      nodes: {json.dumps(nodes_js)},
+      edges: {json.dumps(edges_js)}
+    }};
+
+    const cy = cytoscape({{
+      container: document.getElementById('cy'),
+      elements: [
+        ...elements.nodes,
+        ...elements.edges
+      ],
+      style: [
+        {{
+          selector: 'node',
+          style: {{
+            'label': 'data(label)',
+            'color': '#fff',
+            'font-size': '12px',
+            'font-weight': 'bold',
+            'text-valign': 'center',
+            'text-halign': 'center',
+            'background-color': '#4b5563',
+            'width': '34px',
+            'height': '34px',
+            'border-width': '2px',
+            'border-color': '#1f2937'
+          }}
+        }},
+        {{
+          selector: 'node[roles]',
+          style: {{
+            'background-color': function(node) {{
+              const roles = node.data('roles') || [];
+              if (roles.includes('captured')) return '#8b5cf6';
+              if (roles.includes('missed')) return '#ef4444';
+              if (roles.includes('result')) return '#10b981';
+              if (roles.includes('played')) return '#3b82f6';
+              return '#4b5563';
+            }},
+            'border-color': function(node) {{
+              const roles = node.data('roles') || [];
+              if (roles.includes('captured')) return '#7c3aed';
+              if (roles.includes('missed')) return '#dc2626';
+              if (roles.includes('result')) return '#059669';
+              if (roles.includes('played')) return '#2563eb';
+              return '#111827';
+            }}
+          }}
+        }},
+        {{
+          selector: 'edge',
+          style: {{
+            'width': 2,
+            'line-color': '#4b5563',
+            'target-arrow-shape': 'none',
+            'curve-style': 'bezier',
+            'opacity': 0.6
+          }}
+        }},
+        {{
+          selector: 'edge[type="same_draw"]',
+          style: {{
+            'line-color': '#10b981',
+            'width': 3,
+            'opacity': 0.8
+          }}
+        }},
+        {{
+          selector: 'edge[type="captured_together"]',
+          style: {{
+            'line-color': '#3b82f6',
+            'width': 3,
+            'opacity': 0.8
+          }}
+        }},
+        {{
+          selector: 'edge[type="missed_from_played_set"]',
+          style: {{
+            'line-color': '#ef4444',
+            'line-style': 'dashed',
+            'width': 2,
+            'opacity': 0.9
+          }}
+        }},
+        {{
+          selector: 'edge[type="same_block"]',
+          style: {{
+            'line-color': '#374151',
+            'line-style': 'dotted',
+            'width': 1.5,
+            'opacity': 0.4
+          }}
+        }},
+        {{
+          selector: 'node:selected',
+          style: {{
+            'border-width': '4px',
+            'border-color': '#fbbf24',
+            'width': '40px',
+            'height': '40px'
+          }}
+        }},
+        {{
+          selector: 'edge:selected',
+          style: {{
+            'width': 5,
+            'line-color': '#fbbf24',
+            'opacity': 1.0
+          }}
+        }}
+      ],
+      layout: {{
+        name: 'cose',
+        nodeRepulsion: function( node ){{ return 2048; }},
+        idealEdgeLength: function( edge ){{ return 64; }},
+        animate: true,
+        fit: true,
+        padding: 40
+      }}
+    }});
+
+    cy.on('tap', function(evt) {{
+      const target = evt.target;
+      const detailsDiv = document.getElementById('details-content');
+      
+      if (target === cy) {{
+        detailsDiv.innerHTML = '<p style="color: var(--text-muted); font-style: italic;">Haz clic en un numero o una conexion para ver sus detalles analiticos.</p>';
+        return;
+      }}
+      
+      if (target.isNode()) {{
+        const num = target.data('number');
+        const block = target.data('block');
+        const roles = target.data('roles') || [];
+        
+        let badgesHtml = roles.map(r => `<span class="badge badge-${{r}}">${{r}}</span>`).join(' ');
+        
+        detailsDiv.innerHTML = `
+          <div class="detail-item">
+            <div class="detail-label">Elemento</div>
+            <div class="detail-value" style="font-size: 1.25rem; font-weight: bold; color: var(--accent);">Numero ${{num}}</div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Bloque de revision</div>
+            <div class="detail-value"><code>${{block}}</code></div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Roles en el Analisis</div>
+            <div style="margin-top: 4px;">${{badgesHtml}}</div>
+          </div>
+        `;
+      }} else if (target.isEdge()) {{
+        const type = target.data('type');
+        const severity = target.data('severity');
+        const evidence = target.data('evidence');
+        const sourceNum = cy.getElementById(target.data('source')).data('number');
+        const targetNum = cy.getElementById(target.data('target')).data('number');
+        
+        detailsDiv.innerHTML = `
+          <div class="detail-item">
+            <div class="detail-label">Conexion</div>
+            <div class="detail-value" style="font-weight: bold;">${{sourceNum}} &harr; ${{targetNum}}</div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Tipo de Conexion</div>
+            <div class="detail-value"><code>${{type}}</code></div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Severidad Estructural</div>
+            <div class="detail-value" style="color: ${{severity > 2 ? '#ef4444' : '#fbbf24'}};">${{severity}} / 5</div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Evidencia del Analisis</div>
+            <div class="detail-value" style="font-size: 0.875rem; color: var(--text-muted); line-height: 1.4;">${{evidence}}</div>
+          </div>
+        `;
+      }}
+    }});
+  </script>
+</body>
+</html>
+"""
+    validate_text(html_content)
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(html_content, encoding="utf-8")
+    return path
+
+
+def write_history_dashboard_html(history_data: list[dict[str, Any]], output_path: str | Path) -> Path:
+    from collections import Counter
+    draws = [d["draw"] for d in history_data]
+    sums = [d["sum"] for d in history_data]
+    
+    signatures_counts = Counter(d.get("block_signature", "unknown") for d in history_data)
+    sig_labels = list(signatures_counts.keys())
+    sig_values = list(signatures_counts.values())
+    
+    num_freqs = Counter()
+    for d in history_data:
+        num_freqs.update(d.get("numbers", []))
+    
+    num_labels = list(range(1, 57))
+    num_values = [num_freqs.get(n, 0) for n in num_labels]
+    
+    html_content = f"""<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard Historico Melate/Revancha | MelateApp Lab</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {{
+      --bg: #0b0f19;
+      --panel: #111827;
+      --panel-border: #1f2937;
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --accent: #10b981;
+      --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      min-height: 100vh;
+    }}
+    header {{
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }}
+    h1 {{ margin: 0; font-size: 1.75rem; font-weight: 600; color: #fff; }}
+    h1 span {{ color: var(--accent); }}
+    .subtitle {{ font-size: 0.9rem; color: var(--text-muted); margin-top: 4px; }}
+    .stats-summary {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+    }}
+    .stat-card {{
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 10px;
+      padding: 16px;
+      text-align: center;
+    }}
+    .stat-label {{ font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }}
+    .stat-val {{ font-size: 1.75rem; font-weight: bold; color: #fff; margin-top: 8px; }}
+    .dashboard-grid {{
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 24px;
+    }}
+    @media (min-width: 900px) {{
+      .dashboard-grid {{
+        grid-template-columns: 1fr 1fr;
+      }}
+      .full-width {{
+        grid-column: span 2;
+      }}
+    }}
+    .chart-card {{
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 12px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      height: 400px;
+    }}
+    .chart-card.tall {{
+      height: 450px;
+    }}
+    .chart-title {{ font-size: 1.1rem; font-weight: 600; color: #fff; }}
+    .chart-wrapper {{
+      position: relative;
+      flex: 1;
+      width: 100%;
+      height: 100%;
+    }}
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Dashboard de Analisis Historico</h1>
+      <div class="subtitle">Exploracion interactiva de tendencias de sorteos acumulados</div>
+    </div>
+  </header>
+  
+  <div class="stats-summary">
+    <div class="stat-card">
+      <div class="stat-label">Sorteos Analizados</div>
+      <div class="stat-val">{len(history_data)}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Banda de Suma Promedio</div>
+      <div class="stat-val">{int(sum(sums)/len(sums)) if draws else 0}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Numeros Unicos Vistos</div>
+      <div class="stat-val">{sum(1 for v in num_values if v > 0)} / 56</div>
+    </div>
+  </div>
+
+  <div class="dashboard-grid">
+    <div class="chart-card tall full-width">
+      <div class="chart-title">Histograma y Frecuencia de Numeros (1 al 56)</div>
+      <div class="chart-wrapper">
+        <canvas id="freqChart"></canvas>
+      </div>
+    </div>
+
+    <div class="chart-card">
+      <div class="chart-title">Tendencia de Sumas por Sorteo</div>
+      <div class="chart-wrapper">
+        <canvas id="sumsChart"></canvas>
+      </div>
+    </div>
+
+    <div class="chart-card">
+      <div class="chart-title">Frecuencia de Firmas de Bloque</div>
+      <div class="chart-wrapper">
+        <canvas id="sigChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    Chart.defaults.color = '#9ca3af';
+    Chart.defaults.borderColor = '#1f2937';
+
+    new Chart(document.getElementById('freqChart'), {{
+      type: 'bar',
+      data: {{
+        labels: {json.dumps(num_labels)},
+        datasets: [{{
+          label: 'Apariciones',
+          data: {json.dumps(num_values)},
+          backgroundColor: '#10b981',
+          hoverBackgroundColor: '#34d399',
+          borderRadius: 4
+        }}]
+      }},
+      options: {{
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {{
+          legend: {{ display: false }}
+        }},
+        scales: {{
+          y: {{ beginAtZero: true, grid: {{ color: '#1f2937' }} }},
+          x: {{ grid: {{ display: false }} }}
+        }}
+      }}
+    }});
+
+    new Chart(document.getElementById('sumsChart'), {{
+      type: 'line',
+      data: {{
+        labels: {json.dumps(draws)},
+        datasets: [{{
+          label: 'Suma de numeros',
+          data: {json.dumps(sums)},
+          borderColor: '#3b82f6',
+          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+          fill: true,
+          tension: 0.3,
+          borderWidth: 2
+        }}]
+      }},
+      options: {{
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {{
+          y: {{ 
+            grid: {{ color: '#1f2937' }},
+            suggestedMin: 80,
+            suggestedMax: 240
+          }},
+          x: {{ grid: {{ display: false }} }}
+        }}
+      }}
+    }});
+
+    new Chart(document.getElementById('sigChart'), {{
+      type: 'doughnut',
+      data: {{
+        labels: {json.dumps(sig_labels)},
+        datasets: [{{
+          data: {json.dumps(sig_values)},
+          backgroundColor: [
+            '#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#6b7280'
+          ],
+          borderWidth: 1,
+          borderColor: '#111827'
+        }}]
+      }},
+      options: {{
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {{
+          legend: {{ position: 'right' }}
+        }}
+      }}
+    }});
+  </script>
+</body>
+</html>
+"""
+    validate_text(html_content)
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(html_content, encoding="utf-8")
+    return path
