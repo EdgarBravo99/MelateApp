@@ -334,3 +334,193 @@ def run_history_dashboard(db_path: str | Path = DEFAULT_DB_PATH) -> dict[str, An
         }
     })
 
+
+def run_revision_completa(
+    db_path: str | Path = DEFAULT_DB_PATH,
+    count: int = 10,
+    game: str = "revancha",
+    notes: str | None = None,
+    draw: int | None = None,
+) -> dict[str, Any]:
+    from .historical_store import load_draw_history, suggest_next_draw
+    from .candidate_generator import analyze_time_window, generate_candidates
+    from .relation_graph import build_historical_relation_graph
+    from .thesis_memory import save_thesis_portfolio, load_thesis_portfolios
+    from .number_utils import analyze_portfolio_redundancy
+    from .report_writer import write_consolidated_portfolio_report_html, write_graph_html_report
+
+    _ensure_db_parent(db_path)
+    history = load_draw_history(db_path)
+    if not history:
+        raise ValueError("No hay historial en la memoria para realizar la revisión. Importa resultados primero.")
+
+    next_draw = draw if draw is not None else suggest_next_draw(db_path)
+    analysis = analyze_time_window(history, window=30)
+    graph_data = build_historical_relation_graph(history, window=30, game=game)
+    candidates = generate_candidates(analysis, count=count, graph_data=graph_data)
+
+    # Assign letter labels
+    for idx, cand in enumerate(candidates):
+        cand["letter"] = chr(ord('A') + idx)
+
+    # Save portfolio
+    portfolio_id = save_thesis_portfolio(
+        db_path, draw=next_draw, game=game, candidates=candidates, notes=notes
+    )
+
+    # Load recent portfolio to match database state
+    ports = load_thesis_portfolios(db_path, limit=1)
+    portfolio = ports[0] if ports else {
+        "id": portfolio_id,
+        "draw": next_draw,
+        "game": game,
+        "notes": notes or "",
+        "created_at": ""
+    }
+
+    # Redundancy analysis
+    redundancy = analyze_portfolio_redundancy(candidates)
+
+    # Generate consolidated portfolio report
+    portfolio_report_path = Path("outputs") / f"portfolio_report_{next_draw}.html"
+    write_consolidated_portfolio_report_html(portfolio, candidates, redundancy, portfolio_report_path)
+
+    # Generate historical graph report
+    graph_data["candidates"] = candidates
+    graph_html_path = Path("outputs") / f"historical_graph_{next_draw}.html"
+    write_graph_html_report(graph_data, graph_html_path)
+
+    # Open reports
+    open_report(portfolio_report_path)
+    open_report(graph_html_path)
+
+    return validate_output_json({
+        "portfolio_id": portfolio_id,
+        "portfolio_report_path": str(portfolio_report_path),
+        "graph_html_path": str(graph_html_path),
+        "next_draw": next_draw,
+        "history_count": len(history),
+        "review_default": {
+            "mode": "review_default",
+            "notes_es": f"Revisión completa ejecutada. Cartera de tesis (ID: {portfolio_id}) guardada y reportes abiertos."
+        }
+    })
+
+
+def load_portfolios_list(db_path: str | Path = DEFAULT_DB_PATH, limit: int = 10) -> list[dict[str, Any]]:
+    from .thesis_memory import load_thesis_portfolios
+    _ensure_db_parent(db_path)
+    return validate_output_json(load_thesis_portfolios(db_path, limit))
+
+
+def load_portfolio_candidates(db_path: str | Path = DEFAULT_DB_PATH, portfolio_id: int = 0) -> list[dict[str, Any]]:
+    from .thesis_memory import load_thesis_candidates
+    _ensure_db_parent(db_path)
+    return validate_output_json(load_thesis_candidates(db_path, portfolio_id))
+
+
+def change_candidate_state(db_path: str | Path = DEFAULT_DB_PATH, candidate_id: int = 0, state: str = "Pendiente") -> None:
+    from .thesis_memory import update_candidate_state
+    _ensure_db_parent(db_path)
+    update_candidate_state(db_path, candidate_id, state)
+
+
+def save_candidate_review(db_path: str | Path = DEFAULT_DB_PATH, candidate_id: int = 0, result_numbers: list[int] = [], hits_count: int = 0) -> None:
+    from .thesis_memory import update_candidate_review_result
+    _ensure_db_parent(db_path)
+    update_candidate_review_result(db_path, candidate_id, result_numbers, hits_count)
+
+
+def evaluate_portfolio_against_history(db_path: str | Path = DEFAULT_DB_PATH, portfolio_id: int = 0) -> dict[str, Any]:
+    from .thesis_memory import load_thesis_candidates, update_candidate_review_result, load_thesis_portfolios
+    from .historical_store import load_draw_history
+
+    _ensure_db_parent(db_path)
+    candidates = load_thesis_candidates(db_path, portfolio_id)
+    if not candidates:
+        return {"evaluated": 0, "message": "No hay candidatos en este portfolio."}
+
+    portfolios = load_thesis_portfolios(db_path, limit=100)
+    port = next((p for p in portfolios if p["id"] == portfolio_id), None)
+    if not port:
+        return {"evaluated": 0, "message": "Portfolio no encontrado."}
+
+    draw_num = port["draw"]
+
+    history = load_draw_history(db_path)
+    draw_record = next((d for d in history if d["draw"] == draw_num), None)
+    if not draw_record:
+        return {
+            "evaluated": 0,
+            "message": f"El sorteo {draw_num} no esta en el historial en memoria. Importa resultados mas recientes primero."
+        }
+
+    result_numbers = draw_record["numbers"]
+    result_set = set(result_numbers)
+
+    evaluated_count = 0
+    for cand in candidates:
+        cand_set = set(cand["numbers"])
+        hits = len(cand_set & result_set)
+        update_candidate_review_result(db_path, cand["id"], result_numbers, hits)
+        evaluated_count += 1
+
+    return {
+        "evaluated": evaluated_count,
+        "draw": draw_num,
+        "result_numbers": result_numbers,
+        "message": f"Se evaluaron {evaluated_count} candidatos contra el sorteo {draw_num} ({' '.join(map(str, result_numbers))})."
+    }
+
+
+def run_backtest_lab(
+    db_path: str | Path = DEFAULT_DB_PATH,
+    limit: int = 10,
+    game: str = "revancha",
+    pool_size: int = 200,
+    top_k: int = 10,
+    seed: int = 42,
+    use_ml: bool = False,
+) -> dict[str, Any]:
+    from .historical_store import load_draw_history
+    from .backtest_lab import run_backtest
+    from .report_writer import write_backtest_report_html
+
+    _ensure_db_parent(db_path)
+    history = load_draw_history(db_path)
+    if not history:
+        raise ValueError("No hay historial en la memoria para el backtesting. Importa resultados primero.")
+
+    filtered = [d for d in history if str(d.get("game", "")).casefold() == game.casefold()]
+    filtered.sort(key=lambda d: d.get("draw", 0))
+
+    if not filtered:
+        raise ValueError(f"No hay sorteos en el historial para el juego: {game}")
+
+    target_draws = [d["draw"] for d in filtered[-limit:]]
+
+    results = run_backtest(
+        history=history,
+        target_draws=target_draws,
+        window=30,
+        pool_size=pool_size,
+        top_k=top_k,
+        seed=seed,
+        game=game,
+        use_ml=use_ml,
+    )
+
+    html_path = Path("outputs") / "backtest_report.html"
+    write_backtest_report_html(results, html_path)
+    results["html_path"] = str(html_path)
+
+    return validate_output_json(results)
+
+
+def is_ml_supported() -> bool:
+    from .ml_ranker import is_ml_available
+    return is_ml_available()
+
+
+
+

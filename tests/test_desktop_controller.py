@@ -153,3 +153,70 @@ def test_list_report_files_detects_html_json_csv(tmp_path):
     reports = list_report_files(outputs)
 
     assert [report["extension"] for report in reports] == ["csv", "html", "json"]
+
+
+def test_run_revision_completa_and_db_handlers(tmp_path, monkeypatch):
+    import melate_app_lab.desktop_controller as controller
+    from melate_app_lab.historical_store import import_draws_to_memory
+
+    db_path = tmp_path / "data" / "memory.sqlite"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    opened_paths = []
+    def mock_open_report(path):
+        opened_paths.append(path)
+        return {"opened": str(path)}
+    monkeypatch.setattr(controller, "open_report", mock_open_report)
+
+    dummy_history = [
+        {"draw": 100, "numbers": [1, 2, 3, 4, 5, 6], "sum": 21, "sum_band": "low_band", "block_signature": "6-0-0-0-0", "block_presence_signature": "1-0-0-0-0", "game": "revancha", "date": "2026-05-29"},
+        {"draw": 101, "numbers": [1, 2, 3, 4, 5, 7], "sum": 22, "sum_band": "low_band", "block_signature": "6-0-0-0-0", "block_presence_signature": "1-0-0-0-0", "game": "revancha", "date": "2026-05-29"},
+    ]
+    import_draws_to_memory(dummy_history, db_path)
+
+    res = controller.run_revision_completa(db_path, count=5, game="revancha", notes="Test complete revision notes")
+
+    assert res["portfolio_id"] > 0
+    assert "portfolio_report" in res["portfolio_report_path"]
+    assert "historical_graph" in res["graph_html_path"]
+    assert res["next_draw"] == 102
+    assert res["history_count"] == 2
+    assert len(opened_paths) == 2
+
+    ports = controller.load_portfolios_list(db_path)
+    assert len(ports) == 1
+    assert ports[0]["id"] == res["portfolio_id"]
+    assert ports[0]["draw"] == 102
+    assert ports[0]["notes"] == "Test complete revision notes"
+
+    cands = controller.load_portfolio_candidates(db_path, res["portfolio_id"])
+    assert len(cands) == 5
+    assert cands[0]["portfolio_id"] == res["portfolio_id"]
+
+    cand_id = cands[0]["id"]
+    controller.change_candidate_state(db_path, cand_id, "Favorito")
+    cands_updated = controller.load_portfolio_candidates(db_path, res["portfolio_id"])
+    assert cands_updated[0]["state"] == "Favorito"
+
+    controller.save_candidate_review(db_path, cand_id, result_numbers=[1, 2, 3, 4, 5, 6], hits_count=6)
+    cands_reviewed = controller.load_portfolio_candidates(db_path, res["portfolio_id"])
+    assert cands_reviewed[0]["state"] == "Revisado"
+    assert cands_reviewed[0]["result_numbers"] == [1, 2, 3, 4, 5, 6]
+    assert cands_reviewed[0]["hits_count"] == 6
+
+    # Import draw 102 into history to evaluate portfolio retrospectively
+    import_draws_to_memory([
+        {"draw": 102, "numbers": [1, 2, 3, 10, 20, 30], "sum": 66, "sum_band": "mid_band", "block_signature": "3-1-1-1-0", "block_presence_signature": "1-1-1-1-0", "game": "revancha", "date": "2026-05-30"}
+    ], db_path)
+
+    eval_res = controller.evaluate_portfolio_against_history(db_path, res["portfolio_id"])
+    assert eval_res["evaluated"] == 5
+    assert eval_res["draw"] == 102
+    assert eval_res["result_numbers"] == [1, 2, 3, 10, 20, 30]
+
+    cands_reviewed_hist = controller.load_portfolio_candidates(db_path, res["portfolio_id"])
+    for c in cands_reviewed_hist:
+        assert c["state"] == "Revisado"
+        assert c["result_numbers"] == [1, 2, 3, 10, 20, 30]
+
+

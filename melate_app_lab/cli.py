@@ -184,11 +184,107 @@ def theses(
     typer.echo(format_candidates_report(candidates))
 
 
+@app.command("review-all")
+def review_all(
+    count: Annotated[int, typer.Option()] = 10,
+    game: Annotated[str, typer.Option()] = "revancha",
+    notes: Annotated[str, typer.Option()] = None,
+    draw: Annotated[int, typer.Option()] = None,
+) -> None:
+    from .desktop_controller import run_revision_completa
+
+    res = run_revision_completa(DEFAULT_DB_PATH, count=count, game=game, notes=notes, draw=draw)
+    _json(res)
+
+
+@app.command("search-candidates")
+def search_candidates_cmd(
+    count: Annotated[int, typer.Option()] = 200,
+    game: Annotated[str, typer.Option()] = "revancha",
+    seed: Annotated[int, typer.Option()] = 42,
+) -> None:
+    from .candidate_generator import analyze_time_window
+    from .candidate_search import search_candidates
+    from .historical_store import load_draw_history
+
+    history = load_draw_history(DEFAULT_DB_PATH)
+    if not history:
+        typer.echo("No hay historial en la memoria. Importa resultados primero.")
+        raise typer.Exit(1)
+    analysis = analyze_time_window(history, window=30)
+    pool = search_candidates(analysis, pool_size=count, seed=seed)
+    _json({"candidates": pool, "count": len(pool)})
+
+
+@app.command("rank-candidates")
+def rank_candidates_cmd(
+    candidates_list: Annotated[str, typer.Option("--candidates")] = "",
+    game: Annotated[str, typer.Option()] = "revancha",
+) -> None:
+    from .candidate_ranker import rank_candidates
+    from .candidate_generator import analyze_time_window
+    from .feature_extractor import extract_features
+    from .historical_store import load_draw_history
+    from .relation_graph import build_historical_relation_graph
+    
+    import json
+
+    history = load_draw_history(DEFAULT_DB_PATH)
+    if not history:
+        typer.echo("No hay historial en la memoria. Importa resultados primero.")
+        raise typer.Exit(1)
+
+    try:
+        cand_list = json.loads(candidates_list)
+    except Exception:
+        typer.echo("El parámetro --candidates debe ser un JSON válido conteniendo una lista de listas de números.")
+        raise typer.Exit(1)
+
+    analysis = analyze_time_window(history, window=30)
+    graph_data = build_historical_relation_graph(history, window=30, game=game)
+    train_history = history[-30:] if len(history) >= 30 else history
+
+    features = []
+    for cand in cand_list:
+        feats = extract_features(cand, train_history, history, graph_data)
+        features.append(feats)
+
+    common_sigs = analysis.get("common_signatures", [])
+    common_bands = analysis.get("common_bands", [])
+    ranked = rank_candidates(features, common_sigs, common_bands)
+    _json(ranked)
+
+
+@app.command("backtest")
+def backtest_cmd(
+    limit: Annotated[int, typer.Option()] = 10,
+    game: Annotated[str, typer.Option()] = "revancha",
+    seed: Annotated[int, typer.Option()] = 42,
+    pool_size: Annotated[int, typer.Option()] = 200,
+    top_k: Annotated[int, typer.Option()] = 10,
+    use_ml: Annotated[bool, typer.Option()] = False,
+) -> None:
+    from .desktop_controller import run_backtest_lab, open_report
+
+    res = run_backtest_lab(
+        db_path=DEFAULT_DB_PATH,
+        limit=limit,
+        game=game,
+        pool_size=pool_size,
+        top_k=top_k,
+        seed=seed,
+        use_ml=use_ml,
+    )
+    _json(res)
+    open_report(res["html_path"])
+
+
 @app.command()
 def desktop() -> None:
     from .desktop_app import launch_desktop
 
     raise typer.Exit(launch_desktop())
+
 
 
 @app.command("build-info")

@@ -7,6 +7,29 @@ from pathlib import Path
 from typing import Any
 
 from .guardrails import validate_output_json, validate_text
+from .paths import resources_dir
+
+
+def _get_cytoscape_script() -> str:
+    local_path = resources_dir() / "cytoscape.min.js"
+    if local_path.exists():
+        try:
+            js_content = local_path.read_text(encoding="utf-8")
+            return f"<script>{js_content}</script>"
+        except Exception:
+            pass
+    return '<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.29.2/cytoscape.min.js"></script>'
+
+
+def _get_chartjs_script() -> str:
+    local_path = resources_dir() / "chart.js"
+    if local_path.exists():
+        try:
+            js_content = local_path.read_text(encoding="utf-8")
+            return f"<script>{js_content}</script>"
+        except Exception:
+            pass
+    return '<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>'
 
 
 def write_json_report(report: dict[str, Any], output_path: str | Path) -> Path:
@@ -287,7 +310,7 @@ def _write_postmortem_graph_html(graph_data: dict[str, Any], output_path: str | 
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Grafo postmortem | Sorteo {draw}</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.29.2/cytoscape.min.js"></script>
+  {_get_cytoscape_script()}
   <style>
     :root {{
       --bg: #0b0f19;
@@ -859,7 +882,7 @@ def _write_historical_graph_html(graph_data: dict[str, Any], output_path: str | 
     </div>
   </div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.29.2/cytoscape.min.js"></script>
+  {_get_cytoscape_script()}
   <script>
     if (typeof cytoscape === 'undefined') {{
       document.getElementById('cy').style.display = 'none';
@@ -1263,7 +1286,7 @@ def write_history_dashboard_html(history_data: list[dict[str, Any]], output_path
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Dashboard Historico Melate/Revancha | MelateApp Lab</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  {_get_chartjs_script()}
   <style>
     :root {{
       --bg: #0b0f19;
@@ -1480,3 +1503,762 @@ def write_history_dashboard_html(history_data: list[dict[str, Any]], output_path
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(html_content, encoding="utf-8")
     return path
+
+
+def write_consolidated_portfolio_report_html(
+    portfolio: dict[str, Any],
+    candidates: list[dict[str, Any]],
+    redundancy_analysis: dict[str, Any],
+    output_path: str | Path,
+) -> Path:
+    validate_output_json(portfolio)
+    for c in candidates:
+        validate_output_json(c)
+    validate_output_json(redundancy_analysis)
+
+    draw = portfolio["draw"]
+    game = portfolio["game"]
+    notes = portfolio.get("notes", "") or "Sin notas adicionales."
+    created_at = portfolio.get("created_at", "")
+
+    # Group candidates by classification
+    by_class: dict[str, list[dict[str, Any]]] = {}
+    for c in candidates:
+        cls = c["classification"]
+        by_class.setdefault(cls, []).append(c)
+
+    # Build candidates HTML cards
+    candidates_cards_html = []
+    for cls, cands in by_class.items():
+        candidates_cards_html.append(f"""
+        <div class="profile-group">
+            <h3>{html.escape(cls)}</h3>
+            <div class="cards-grid">
+        """)
+        for c in cands:
+            letter = c.get("letter", "?")
+            nums_str = " ".join(map(str, c["numbers"]))
+            score = c.get("graph_support_score", 0)
+            sig = c.get("block_signature", "")
+            band = c.get("sum_band", "")
+            sum_val = c.get("sum", 0)
+            state = c.get("state", "Pendiente")
+
+            bullets_html = "".join(f"<li>{html.escape(b)}</li>" for b in c.get("reason_bullets", []))
+
+            # Connections details
+            conn_html = ""
+            if c.get("pair_edges"):
+                conn_html = "<h4>Conexiones internas:</h4><ul>" + "".join(
+                    f"<li>{html.escape(pe['pair'])} ({pe['count']} coapariciones)</li>" for pe in c["pair_edges"]
+                ) + "</ul>"
+
+            candidates_cards_html.append(f"""
+                <div class="card state-{state.lower()}">
+                    <div class="card-header">
+                        <span class="card-letter">Set {html.escape(letter)}</span>
+                        <span class="badge badge-{state.lower()}">{html.escape(state)}</span>
+                    </div>
+                    <div class="card-numbers">{html.escape(nums_str)}</div>
+                    <div class="card-metrics">
+                        <div class="card-metric">Soporte: <strong>{score}</strong></div>
+                        <div class="card-metric">Firma: <code>{html.escape(sig)}</code></div>
+                        <div class="card-metric">Suma: <strong>{sum_val}</strong> ({html.escape(band)})</div>
+                    </div>
+                    <div class="card-reasons">
+                        <ul>{bullets_html}</ul>
+                    </div>
+                    {conn_html}
+                </div>
+            """)
+        candidates_cards_html.append("</div></div>")
+
+    candidates_html_section = "\n".join(candidates_cards_html)
+
+    # Build redundancy alerts HTML
+    alerts_html = []
+    if redundancy_analysis["has_alerts"]:
+        alerts_html.append("""
+        <div class="alert-box alert-danger">
+            <h3>⚠️ Alertas de Concentración y Redundancia Estructural</h3>
+            <p>Se han identificado los siguientes riesgos de sobredimensión o redundancia en la cartera:</p>
+            <ul>
+        """)
+
+        # Redundancies (shared numbers)
+        for r in redundancy_analysis["redundancies"]:
+            lvl = "danger" if r["level"] == "alta" else "warning"
+            alerts_html.append(f"""
+                <li class="alert-item alert-item-{lvl}">
+                    <strong>Set {html.escape(r['set_a'])} vs Set {html.escape(r['set_b'])}</strong>:
+                    Comparten {r['shared_count']} números ({html.escape(str(r['shared_numbers']))}).
+                    Nivel: <span class="text-{lvl}">{html.escape(r['level'].upper())}</span>
+                </li>
+            """)
+
+        # Number concentration
+        for nc in redundancy_analysis["number_concentration"]:
+            alerts_html.append(f"""
+                <li class="alert-item alert-item-danger">
+                    <strong>Concentración de número ({nc['number']})</strong>:
+                    Aparece en el {nc['percentage']}% de los sets (límite 40%).
+                </li>
+            """)
+
+        # Signature concentration
+        for sc in redundancy_analysis["signature_concentration"]:
+            alerts_html.append(f"""
+                <li class="alert-item alert-item-danger">
+                    <strong>Concentración de firma ({html.escape(sc['signature'])})</strong>:
+                    Presente en el {sc['percentage']}% de los sets (límite 60%).
+                </li>
+            """)
+
+        # Profile concentration
+        for pc in redundancy_analysis["profile_concentration"]:
+            alerts_html.append(f"""
+                <li class="alert-item alert-item-danger">
+                    <strong>Concentración de perfil ({html.escape(pc['profile'])})</strong>:
+                    Presente en el {pc['percentage']}% de los sets (límite 60%).
+                </li>
+            """)
+
+        # Block concentration
+        for bc in redundancy_analysis["block_concentration"]:
+            alerts_html.append(f"""
+                <li class="alert-item alert-item-danger">
+                    <strong>Concentración de bloque ({html.escape(bc['block'])})</strong>:
+                    Acumula el {bc['percentage']}% de todas las apariciones de números (límite 35%).
+                </li>
+            """)
+
+        alerts_html.append("</ul></div>")
+    else:
+        alerts_html.append("""
+        <div class="alert-box alert-success">
+            <h3>✅ Cartera Diversificada</h3>
+            <p>La cartera cumple con todos los límites estructurales de redundancia y concentración (intersección, números, firmas, perfiles y bloques).</p>
+        </div>
+        """)
+
+    alerts_html_section = "\n".join(alerts_html)
+
+    html_content = f"""<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reporte de Cartera de Tesis | MelateApp Lab</title>
+  <style>
+    :root {{
+      --bg: #0b0f19;
+      --panel: #111827;
+      --panel-border: #1f2937;
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --accent: #f59e0b;
+      --accent-success: #10b981;
+      --accent-danger: #ef4444;
+      --accent-warning: #f59e0b;
+      --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      line-height: 1.6;
+      padding: 32px 20px;
+    }}
+    main {{
+      max-width: 1200px;
+      margin: 0 auto;
+    }}
+    header {{
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      padding: 24px;
+      margin-bottom: 24px;
+    }}
+    h1 {{ margin: 0; font-size: 1.8rem; color: #fff; }}
+    h1 span {{ color: var(--accent); }}
+    .meta-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-top: 16px;
+      border-top: 1px solid var(--panel-border);
+      padding-top: 16px;
+    }}
+    .meta-item {{ font-size: 0.9rem; }}
+    .meta-label {{ color: var(--text-muted); text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; }}
+    .meta-value {{ font-weight: bold; margin-top: 4px; }}
+
+    .alert-box {{
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 24px;
+    }}
+    .alert-danger {{
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #fca5a5;
+    }}
+    .alert-success {{
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: #a7f3d0;
+    }}
+    .alert-box h3 {{ margin: 0 0 10px 0; font-size: 1.1rem; }}
+    .alert-item {{ margin-bottom: 8px; font-size: 0.9rem; list-style-type: none; position: relative; padding-left: 20px; }}
+    .alert-item::before {{
+      content: "•";
+      position: absolute;
+      left: 0;
+      font-size: 1.2rem;
+    }}
+    .alert-item-danger::before {{ color: var(--accent-danger); }}
+    .alert-item-warning::before {{ color: var(--accent-warning); }}
+    .text-danger {{ color: var(--accent-danger); font-weight: bold; }}
+    .text-warning {{ color: var(--accent-warning); font-weight: bold; }}
+
+    .profile-group {{
+      margin-bottom: 32px;
+    }}
+    .profile-group h3 {{
+      border-bottom: 2px solid var(--panel-border);
+      padding-bottom: 8px;
+      color: #fff;
+      font-size: 1.2rem;
+      margin-bottom: 16px;
+    }}
+    .cards-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+      gap: 20px;
+    }}
+    .card {{
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      transition: transform 0.2s, border-color 0.2s;
+    }}
+    .card:hover {{
+      transform: translateY(-2px);
+      border-color: #3b82f6;
+    }}
+    .card-header {{
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }}
+    .card-letter {{ font-weight: bold; color: #fff; font-size: 1.1rem; }}
+    .badge {{
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: bold;
+      text-transform: uppercase;
+    }}
+    .badge-pendiente {{ background: rgba(156, 163, 175, 0.2); color: #9ca3af; border: 1px solid rgba(156, 163, 175, 0.4); }}
+    .badge-favorito {{ background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.4); }}
+    .badge-jugado {{ background: rgba(59, 130, 246, 0.2); color: #3b82f6; border: 1px solid rgba(59, 130, 246, 0.4); }}
+    .badge-descartado {{ background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.4); }}
+    .badge-revisado {{ background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4); }}
+
+    .card-numbers {{
+      font-size: 1.5rem;
+      font-weight: bold;
+      letter-spacing: 2px;
+      color: #fff;
+      text-align: center;
+      background: rgba(255,255,255,0.02);
+      padding: 10px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.05);
+    }}
+    .card-numbers:hover {{
+      color: var(--accent);
+    }}
+    .card-metrics {{
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      font-size: 0.8rem;
+      text-align: center;
+    }}
+    .card-metric {{
+      background: rgba(255,255,255,0.03);
+      padding: 6px;
+      border-radius: 4px;
+      color: var(--text-muted);
+    }}
+    .card-metric strong {{ color: #fff; }}
+    .card-metric code {{ color: var(--accent); }}
+
+    .card-reasons ul {{ margin: 0; padding-left: 16px; font-size: 0.85rem; color: var(--text-muted); }}
+    .card h4 {{ margin: 8px 0 4px 0; font-size: 0.85rem; color: #fff; }}
+    .card ul {{ margin: 0; padding-left: 16px; font-size: 0.8rem; color: var(--text-muted); }}
+
+    footer {{
+      margin-top: 48px;
+      border-top: 1px solid var(--panel-border);
+      padding-top: 20px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      text-align: center;
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Reporte de Cartera de Tesis | <span>MelateApp Lab v1.0</span></h1>
+      <div class="meta-grid">
+        <div class="meta-item">
+          <div class="meta-label">Juego / Tipo</div>
+          <div class="meta-value">{html.escape(game.upper())}</div>
+        </div>
+        <div class="meta-item">
+          <div class="meta-label">Sorteo Objetivo</div>
+          <div class="meta-value">{draw}</div>
+        </div>
+        <div class="meta-item">
+          <div class="meta-label">Fecha de Generación</div>
+          <div class="meta-value">{html.escape(created_at)}</div>
+        </div>
+        <div class="meta-item">
+          <div class="meta-label">Notas de Cartera</div>
+          <div class="meta-value">{html.escape(notes)}</div>
+        </div>
+      </div>
+    </header>
+
+    {alerts_html_section}
+
+    {candidates_html_section}
+
+    <footer>
+      <p><strong>Nota Descriptiva del Laboratorio:</strong> Este reporte de candidatos y tesis tiene un propósito puramente analítico y descriptivo de relaciones observadas en la ventana histórica. La aplicación no realiza predicciones ni promete resultados de sorteos de la Lotería Nacional.</p>
+    </footer>
+  </main>
+</body>
+</html>
+"""
+    validate_text(html_content)
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(html_content, encoding="utf-8")
+    return path
+
+
+def write_backtest_report_html(backtest_results: dict[str, Any], output_path: str | Path) -> Path:
+    validate_output_json(backtest_results)
+    
+    metrics = backtest_results.get("metrics", {})
+    draws_data = backtest_results.get("results", [])
+    game = backtest_results.get("game", "revancha")
+    
+    draws_labels = [str(r["draw"]) for r in draws_data]
+    ranker_max_hits = [r["ranker_top_k_max_hits"] for r in draws_data]
+    baseline_max_hits = [r["baseline_top_k_max_hits"] for r in draws_data]
+    
+    chart_js = f"""
+    document.addEventListener("DOMContentLoaded", function() {{
+      const ctx = document.getElementById("backtestChart").getContext("2d");
+      new Chart(ctx, {{
+        type: 'line',
+        data: {{
+          labels: {json.dumps(draws_labels)},
+          datasets: [
+            {{
+              label: 'Ranker Estructural (Top K Máx Aciertos)',
+              data: {json.dumps(ranker_max_hits)},
+              borderColor: '#f59e0b',
+              backgroundColor: 'rgba(245, 158, 11, 0.1)',
+              tension: 0.1,
+              fill: true
+            }},
+            {{
+              label: 'Baseline Aleatorio (Top K Máx Aciertos)',
+              data: {json.dumps(baseline_max_hits)},
+              borderColor: '#6b7280',
+              backgroundColor: 'rgba(107, 114, 128, 0.1)',
+              tension: 0.1,
+              fill: true
+            }}
+          ]
+        }},
+        options: {{
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {{
+            legend: {{ labels: {{ color: '#f3f4f6' }} }}
+          }},
+          scales: {{
+            x: {{ grid: {{ color: '#1f2937' }}, ticks: {{ color: '#9ca3af' }} }},
+            y: {{ grid: {{ color: '#1f2937' }}, ticks: {{ color: '#9ca3af' }}, min: 0, max: 6 }}
+          }}
+        }}
+      }});
+    }});
+    """
+
+    rows_html = []
+    for r in draws_data:
+        draw_id = r["draw"]
+        nums_str = " ".join(map(str, r["numbers"]))
+        r_max = r["ranker_top_k_max_hits"]
+        b_max = r["baseline_top_k_max_hits"]
+        
+        r_class = "text-success" if r_max >= 3 else ("text-warning" if r_max > 0 else "")
+        b_class = "text-success" if b_max >= 3 else ("text-warning" if b_max > 0 else "")
+        
+        rows_html.append(f"""
+        <tr>
+          <td>{draw_id}</td>
+          <td><code>{nums_str}</code></td>
+          <td class="{r_class}"><strong>{r_max}</strong></td>
+          <td>{r["ranker_top_k_mean_hits"]:.2f}</td>
+          <td class="{b_class}"><strong>{b_max}</strong></td>
+          <td>{r["baseline_top_k_mean_hits"]:.2f}</td>
+        </tr>
+        """)
+        
+    table_body = "\n".join(rows_html)
+    chart_script_tag = _get_chartjs_script()
+    
+    html_content = f"""<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Laboratorio de Evaluación Retrospectiva | MelateApp</title>
+  <style>
+    :root {{
+      --bg: #0b0f19;
+      --panel: #111827;
+      --panel-border: #1f2937;
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --accent: #f59e0b;
+      --accent-success: #10b981;
+      --accent-danger: #ef4444;
+      --accent-warning: #f59e0b;
+      --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    }}
+    body {{
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      padding: 32px 20px;
+      margin: 0;
+      line-height: 1.6;
+    }}
+    main {{
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }}
+    header {{
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      padding: 24px;
+    }}
+    h1 {{ margin: 0; font-size: 1.8rem; }}
+    h1 span {{ color: var(--accent); }}
+    
+    .meta-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-top: 16px;
+      border-top: 1px solid var(--panel-border);
+      padding-top: 16px;
+    }}
+    .meta-item {{
+      background: rgba(255,255,255,0.01);
+      padding: 12px;
+      border-radius: 6px;
+      border: 1px solid var(--panel-border);
+    }}
+    .meta-label {{ color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }}
+    .meta-value {{ font-size: 1.2rem; font-weight: bold; margin-top: 4px; }}
+    
+    .chart-container {{
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      padding: 24px;
+      position: relative;
+      height: 400px;
+      width: 100%;
+    }}
+    
+    .table-container {{
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      padding: 24px;
+      overflow-x: auto;
+    }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }}
+    th, td {{
+      padding: 12px;
+      border-bottom: 1px solid var(--panel-border);
+    }}
+    th {{
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      text-transform: uppercase;
+    }}
+    tr:hover td {{
+      background: rgba(255,255,255,0.02);
+    }}
+    
+    .text-success {{ color: var(--accent-success); }}
+    .text-warning {{ color: var(--accent-warning); }}
+    
+    footer {{
+      border-top: 1px solid var(--panel-border);
+      padding-top: 20px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      text-align: center;
+    }}
+  </style>
+  {chart_script_tag}
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Evaluación Retrospectiva | <span>ML Lab & Backtesting</span></h1>
+      <p style="margin: 4px 0 0 0; color: var(--text-muted);">Análisis de desempeño de candidatos estructurales en sorteos históricos del juego {html.escape(game.upper())}</p>
+      
+      <div class="meta-grid">
+        <div class="meta-item">
+          <div class="meta-label">Sorteos Evaluados</div>
+          <div class="meta-value">{metrics.get("draws_evaluated", 0)}</div>
+        </div>
+        <div class="meta-item">
+          <div class="meta-label">Tasa Acumulada ≥ 3 Aciertos (Ranker)</div>
+          <div class="meta-value text-success">{metrics.get("ranker_3plus_rate", 0)}%</div>
+        </div>
+        <div class="meta-item">
+          <div class="meta-label">Tasa Acumulada ≥ 3 Aciertos (Baseline)</div>
+          <div class="meta-value">{metrics.get("baseline_3plus_rate", 0)}%</div>
+        </div>
+        <div class="meta-item">
+          <div class="meta-label">Promedio Máx Aciertos (Ranker vs Base)</div>
+          <div class="meta-value" style="color: var(--accent);">{metrics.get("avg_ranker_top_k_max_hits", 0)} vs {metrics.get("avg_baseline_top_k_max_hits", 0)}</div>
+        </div>
+      </div>
+    </header>
+
+    <div class="chart-container">
+      <canvas id="backtestChart" style="height:100%; width:100%;"></canvas>
+    </div>
+
+    <div class="table-container">
+      <h3>Detalle de Simulaciones Walk-Forward</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Sorteo</th>
+            <th>Resultado Real</th>
+            <th>Máx Aciertos (Ranker)</th>
+            <th>Media Aciertos (Ranker)</th>
+            <th>Máx Aciertos (Baseline)</th>
+            <th>Media Aciertos (Baseline)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {table_body}
+        </tbody>
+      </table>
+    </div>
+
+    <footer>
+      <p><strong>Nota Descriptiva del Laboratorio:</strong> Este reporte de backtesting y evaluación retrospectiva tiene un propósito puramente analítico y descriptivo de relaciones estructurales en la ventana histórica. La aplicación no realiza predicciones ni promete resultados de sorteos de la Lotería Nacional.</p>
+    </footer>
+  </main>
+  <script>
+    {chart_js}
+  </script>
+</body>
+</html>
+"""
+    validate_text(html_content)
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(html_content, encoding="utf-8")
+    return path
+
+
+def write_candidates_catalog_html(
+    candidates_features: list[dict[str, Any]],
+    output_path: str | Path,
+    game: str = "revancha",
+) -> Path:
+    validate_output_json(candidates_features)
+    
+    rows_html = []
+    for cand in candidates_features:
+        rank = cand.get("rank", 0)
+        nums_str = " ".join(map(str, cand["numbers"]))
+        score = cand.get("rank_score", 0.0)
+        sig = cand.get("block_signature", "")
+        sum_val = cand.get("sum", 0)
+        band = cand.get("sum_band", "")
+        freq_m = cand.get("frequency_mean", 0.0)
+        w_deg_m = cand.get("weighted_degree_mean", 0.0)
+        div = cand.get("diversity_score", 0)
+        exact = "Sí" if cand.get("historical_exact_match") else "No"
+        
+        exact_class = "text-danger" if cand.get("historical_exact_match") else ""
+        
+        rows_html.append(f"""
+        <tr>
+          <td><strong>#{rank}</strong></td>
+          <td><code style="font-size: 1.1rem; color: #fff;">{nums_str}</code></td>
+          <td><strong>{score:.2f}</strong></td>
+          <td><code>{sig}</code></td>
+          <td>{sum_val} ({band})</td>
+          <td>{freq_m:.2f}</td>
+          <td>{w_deg_m:.2f}</td>
+          <td>{div}</td>
+          <td class="{exact_class}">{exact}</td>
+        </tr>
+        """)
+        
+    table_body = "\n".join(rows_html)
+    
+    html_content = f"""<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Catálogo de Candidatos Estructurales | MelateApp</title>
+  <style>
+    :root {{
+      --bg: #0b0f19;
+      --panel: #111827;
+      --panel-border: #1f2937;
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --accent: #f59e0b;
+      --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    }}
+    body {{
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      padding: 32px 20px;
+      margin: 0;
+      line-height: 1.6;
+    }}
+    main {{
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }}
+    header {{
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      padding: 24px;
+    }}
+    h1 {{ margin: 0; font-size: 1.8rem; }}
+    h1 span {{ color: var(--accent); }}
+    
+    .table-container {{
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      padding: 24px;
+      overflow-x: auto;
+    }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }}
+    th, td {{
+      padding: 12px;
+      border-bottom: 1px solid var(--panel-border);
+    }}
+    th {{
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      text-transform: uppercase;
+    }}
+    tr:hover td {{
+      background: rgba(255,255,255,0.02);
+    }}
+    .text-danger {{ color: #ef4444; font-weight: bold; }}
+    
+    footer {{
+      border-top: 1px solid var(--panel-border);
+      padding-top: 20px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      text-align: center;
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Catálogo de Candidatos Estructurales | <span>MelateApp Lab</span></h1>
+      <p style="margin: 4px 0 0 0; color: var(--text-muted);">Candidatos descriptivos ordenados por puntuación estructural para el juego {html.escape(game.upper())}</p>
+    </header>
+
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>Rango</th>
+            <th>Combinación</th>
+            <th>Puntuación</th>
+            <th>Firma</th>
+            <th>Suma</th>
+            <th>Frec. Media</th>
+            <th>Grado Ponderado Medio</th>
+            <th>Bloques Ocupados</th>
+            <th>Exact Match Histórico</th>
+          </tr>
+        </thead>
+        <tbody>
+          {table_body}
+        </tbody>
+      </table>
+    </div>
+
+    <footer>
+      <p><strong>Nota Descriptiva del Laboratorio:</strong> Este catálogo tiene un propósito puramente analítico y descriptivo de relaciones estructurales en la ventana histórica. La aplicación no realiza predicciones ni promete resultados de sorteos de la Lotería Nacional.</p>
+    </footer>
+  </main>
+</body>
+</html>
+"""
+    validate_text(html_content)
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(html_content, encoding="utf-8")
+    return path
+

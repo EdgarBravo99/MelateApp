@@ -19,5 +19,12 @@ def outputs_dir() -> Path:
     return path
 
 
+def resources_dir() -> Path:
+    path = project_root() / "resources"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def default_memory_path() -> Path:
     return data_dir() / "melate_app_memory.sqlite"
+
