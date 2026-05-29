@@ -46,6 +46,7 @@ def run_backtest(
     seed: int = 42,
     game: str = "revancha",
     use_ml: bool = False,
+    log_fn: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Execute a walk-forward retrospective evaluation of candidates against historical draws.
 
@@ -67,6 +68,9 @@ def run_backtest(
     for target_draw in sorted(target_draws):
         if target_draw not in history_by_draw:
             continue
+
+        if log_fn:
+            log_fn(f"Evaluando sorteo retrospectivo {target_draw}...")
 
         target_record = history_by_draw[target_draw]
         target_numbers = target_record["numbers"]
@@ -109,6 +113,8 @@ def run_backtest(
         if actual_use_ml:
             prior_draw_ids = [d["draw"] for d in prior_history]
             ml_train_draws = prior_draw_ids[-30:] if len(prior_draw_ids) >= 30 else prior_draw_ids
+            if log_fn:
+                log_fn(f"  Entrenando ML Ranker en sorteo {target_draw} usando {len(ml_train_draws)} sorteos pasados...")
             model = train_ml_ranker(history, ml_train_draws, window=window, game=game)
             ranked_candidates = rank_candidates_ml(model, cand_features, common_sigs, common_bands)
             ranked_baseline = rank_candidates_ml(model, baseline_features, common_sigs, common_bands)
