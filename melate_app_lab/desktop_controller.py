@@ -39,6 +39,12 @@ def parse_ticket(text: str) -> list[int]:
 
 
 def parse_played_tickets_flexible(text: str) -> list[list[int]]:
+    for match in re.findall(r"\d+", text):
+        if len(match) > 2:
+            raise ValueError(
+                "Cada boleto debe tener 6 números separados por espacio, coma, tab o salto de línea."
+            )
+
     numbers = [int(match) for match in re.findall(r"\d+", text)]
     if not numbers:
         return []
@@ -46,7 +52,7 @@ def parse_played_tickets_flexible(text: str) -> list[list[int]]:
     leftover = len(numbers) % 6
     if leftover:
         raise ValueError(
-            f"Sobran {leftover} numeros: los boletos jugados deben venir en grupos exactos de 6."
+            "Cada boleto debe tener 6 números separados por espacio, coma, tab o salto de línea."
         )
 
     tickets: list[list[int]] = []
@@ -54,11 +60,15 @@ def parse_played_tickets_flexible(text: str) -> list[list[int]]:
         ticket = numbers[offset : offset + 6]
         out_of_range = [number for number in ticket if number < 1 or number > 56]
         if out_of_range:
-            raise ValueError(f"Numeros fuera de rango 1-56: {out_of_range}.")
+            raise ValueError(
+                "Cada boleto debe tener 6 números separados por espacio, coma, tab o salto de línea."
+            )
 
         duplicates = sorted({number for number in ticket if ticket.count(number) > 1})
         if duplicates:
-            raise ValueError(f"Numeros duplicados en boleto: {duplicates}.")
+            raise ValueError(
+                "Cada boleto debe tener 6 números separados por espacio, coma, tab o salto de línea."
+            )
 
         tickets.append(ticket)
 
