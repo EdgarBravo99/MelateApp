@@ -29,6 +29,7 @@ def launch_desktop() -> int:
             QApplication,
             QAbstractItemView,
             QButtonGroup,
+            QComboBox,
             QFrame,
             QFileDialog,
             QGridLayout,
@@ -56,7 +57,16 @@ def launch_desktop() -> int:
     app = QApplication(sys.argv)
     app.setStyleSheet(APP_QSS)
 
-    window = QMainWindow()
+    class MainWindow(QMainWindow):
+        def closeEvent(self, event) -> None:
+            try:
+                log("Cerrando aplicacion y deteniendo hilos...")
+                qt_runner.stop_all()
+            except Exception:
+                pass
+            event.accept()
+
+    window = MainWindow()
     window.setWindowTitle("MelateApp Local Intelligence Lab")
     window.resize(1240, 800)
 
@@ -217,6 +227,9 @@ def launch_desktop() -> int:
         log(json.dumps(payload, ensure_ascii=False, indent=2))
         if not isinstance(payload, dict):
             return
+
+        if payload.get("report_text") and "candidates" in payload:
+            candidates_output.setPlainText(payload["report_text"])
 
         if payload.get("html_path"):
             last_html_report["path"] = str(payload["html_path"])
@@ -480,6 +493,13 @@ def launch_desktop() -> int:
         except Exception as e:
             log(f"Error: {e}")
 
+    def start_graph_visualization():
+        try:
+            draw, result_text, played_text = validate_inputs()
+            run_action("Ver Grafo", lambda: controller.run_graph_visualization(draw, result_text, played_text), True)
+        except Exception as e:
+            log(f"Error: {e}")
+
     actions_config = [
         ("Trace", start_trace),
         ("Postmortem", start_postmortem),
@@ -487,6 +507,7 @@ def launch_desktop() -> int:
         ("Brain Review", start_brain_review),
         ("Remember", start_remember),
         ("Generate Report", start_generate_report),
+        ("Ver Grafo", start_graph_visualization),
     ]
     for label, fn in actions_config:
         button = QPushButton(label)
@@ -515,18 +536,23 @@ def launch_desktop() -> int:
     import_res_button = QPushButton("Importar resultados.csv")
     refresh_history_button = QPushButton("Actualizar tabla")
     summarize_history_button = QPushButton("Resumen historico")
+    dashboard_button = QPushButton("Generar Dashboard Visual")
     
     import_res_button.clicked.connect(start_import_csv_workflow)
     refresh_history_button.clicked.connect(lambda: run_action("Actualizar historial", refresh_history_table, False))
     summarize_history_button.clicked.connect(
         lambda: run_action("Resumen historico", lambda: controller.run_history_summary(DEFAULT_DB_PATH), False)
     )
+    dashboard_button.clicked.connect(
+        lambda: run_action("Generar Dashboard", lambda: controller.run_history_dashboard(DEFAULT_DB_PATH), False)
+    )
     history_actions.addWidget(import_res_button)
     history_actions.addWidget(refresh_history_button)
     history_actions.addWidget(summarize_history_button)
+    history_actions.addWidget(dashboard_button)
     history_actions.addStretch(1)
     
-    action_buttons.extend([import_res_button, refresh_history_button, summarize_history_button])
+    action_buttons.extend([import_res_button, refresh_history_button, summarize_history_button, dashboard_button])
     
     history_layout.addLayout(history_actions)
     history_layout.addWidget(history_table, 1)
@@ -554,6 +580,43 @@ def launch_desktop() -> int:
     
     reports_layout.addLayout(reports_actions)
     reports_layout.addWidget(reports_table, 1)
+
+    # CANDIDATES PAGE
+    candidates_page, candidates_layout = make_page()
+    cand_panel = QFrame()
+    cand_panel.setObjectName("Panel")
+    cand_panel_layout = QHBoxLayout(cand_panel)
+    cand_panel_layout.setContentsMargins(14, 14, 14, 14)
+    cand_panel_layout.setSpacing(10)
+    
+    cand_count_select = QComboBox()
+    cand_count_select.addItems(["10", "20", "50"])
+    
+    generate_cand_btn = QPushButton("Generar Tesis y Candidatos")
+    
+    def start_generate_candidates():
+        try:
+            count = int(cand_count_select.currentText())
+            run_action("Generar Candidatos", lambda: controller.run_generate_candidates(DEFAULT_DB_PATH, count), True)
+        except Exception as e:
+            log(f"Error: {e}")
+            
+    generate_cand_btn.clicked.connect(start_generate_candidates)
+    
+    cand_panel_layout.addWidget(QLabel("Combinaciones a generar:"))
+    cand_panel_layout.addWidget(cand_count_select)
+    cand_panel_layout.addWidget(generate_cand_btn)
+    cand_panel_layout.addStretch()
+    
+    action_buttons.extend([generate_cand_btn])
+    
+    candidates_output = QPlainTextEdit()
+    candidates_output.setObjectName("ActivityConsole")
+    candidates_output.setReadOnly(True)
+    
+    candidates_layout.addWidget(cand_panel)
+    candidates_layout.addWidget(QLabel("Resultados de Tesis y Candidatos:"))
+    candidates_layout.addWidget(candidates_output, 1)
 
     # SETTINGS PAGE
     settings_page, settings_layout = make_page()
@@ -614,6 +677,7 @@ def launch_desktop() -> int:
     pages = [
         ("Nuevo analisis", "Ejecuta revisiones locales, guarda memoria y genera reportes sin salir del escritorio.", analysis_page),
         ("Historial", "Importa sorteos previos y revisa la memoria local en tabla.", history_page),
+        ("Candidatos", "Genera combinaciones candidatas y tesis analitica basada en historial.", candidates_page),
         ("Reportes", "Consulta archivos exportados y abre reportes generados.", reports_page),
         ("Configuracion", "Rutas y tareas operativas para el laboratorio local.", settings_page),
     ]

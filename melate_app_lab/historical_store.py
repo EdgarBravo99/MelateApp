@@ -27,7 +27,7 @@ def _connect(db_path: str | Path | None = None) -> sqlite3.Connection:
     return sqlite3.connect(":memory:" if db_path is None else str(db_path))
 
 
-def _ensure_schema(connection: sqlite3.Connection) -> None:
+def ensure_schema(connection: sqlite3.Connection) -> None:
     connection.execute(SCHEMA)
     connection.commit()
 
@@ -51,7 +51,7 @@ def import_draws_to_memory(
     db_path: str | Path | None = None,
 ) -> sqlite3.Connection:
     connection = _connect(db_path)
-    _ensure_schema(connection)
+    ensure_schema(connection)
 
     for record in records:
         insert_draw_record(connection, record, commit=False, ensure_schema=False)
@@ -67,7 +67,7 @@ def insert_draw_record(
     ensure_schema: bool = True,
 ) -> bool:
     if ensure_schema:
-        _ensure_schema(connection)
+        ensure_schema(connection)
     normalized = normalize_draw_record(record)
     cursor = connection.execute(
         """
@@ -103,7 +103,7 @@ def load_draw_history(
     else:
         connection = _connect(source)
 
-    _ensure_schema(connection)
+    ensure_schema(connection)
     limit_clause = ""
     params: tuple[Any, ...] = ()
     order_by = "draw_date, game, draw"
@@ -152,7 +152,7 @@ def get_latest_draw(
     else:
         connection = _connect(source)
 
-    _ensure_schema(connection)
+    ensure_schema(connection)
     if game is None:
         cursor = connection.execute("SELECT MAX(draw) FROM historical_draws")
     else:

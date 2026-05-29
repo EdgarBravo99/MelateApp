@@ -156,3 +156,12 @@ class QtTaskRunner:
         self._workers.append(receiver)
         thread.start()
         return thread
+
+    def stop_all(self) -> None:
+        threads = list(self._threads)
+        for thread in threads:
+            if thread.isRunning():
+                thread.quit()
+                thread.wait()
+        self._threads.clear()
+        self._workers.clear()
