@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 import sqlite3
 from pathlib import Path
@@ -21,8 +22,18 @@ def _connect(db_path: str | Path) -> sqlite3.Connection:
     return sqlite3.connect(path)
 
 
+@contextmanager
+def _connection_context(db_path: str | Path):
+    conn = _connect(db_path)
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
+
+
 def _init_db(db_path: str | Path) -> None:
-    with _connect(db_path) as conn:
+    with _connection_context(db_path) as conn:
         conn.execute(
             """
             create table if not exists review_theses (
@@ -77,6 +88,7 @@ def _init_db(db_path: str | Path) -> None:
                 sum_band text not null,
                 block_signature text not null,
                 graph_support_score integer not null,
+                rank_score real,
                 pair_edges text,
                 evidence_draws text,
                 notes text,
@@ -87,6 +99,11 @@ def _init_db(db_path: str | Path) -> None:
             )
             """
         )
+        try:
+            conn.execute("ALTER TABLE thesis_candidates ADD COLUMN rank_score REAL")
+        except sqlite3.OperationalError:
+            pass  # Already exists
+
 
 
 def _validate_memory_text(draw: int, text: str, field: str) -> None:
@@ -100,7 +117,7 @@ def _validate_memory_text(draw: int, text: str, field: str) -> None:
 def remember_review_thesis(db_path: str | Path, draw: int, thesis: str) -> None:
     _validate_memory_text(draw, thesis, "thesis")
     _init_db(db_path)
-    with _connect(db_path) as conn:
+    with _connection_context(db_path) as conn:
         conn.execute(
             "insert into review_theses (draw, thesis) values (?, ?)",
             (draw, thesis),
@@ -113,7 +130,7 @@ def remember_review_thesis(db_path: str | Path, draw: int, thesis: str) -> None:
 
 def load_recent_theses(db_path: str | Path, limit: int = 10) -> list[dict[str, Any]]:
     _init_db(db_path)
-    with _connect(db_path) as conn:
+    with _connection_context(db_path) as conn:
         rows = conn.execute(
             """
             select draw, thesis, created_at
@@ -134,7 +151,7 @@ def load_recent_theses(db_path: str | Path, limit: int = 10) -> list[dict[str, A
 def remember_cycle_note(db_path: str | Path, draw: int, note: str) -> None:
     _validate_memory_text(draw, note, "note")
     _init_db(db_path)
-    with _connect(db_path) as conn:
+    with _connection_context(db_path) as conn:
         conn.execute(
             "insert into cycle_notes (draw, note) values (?, ?)",
             (draw, note),
@@ -147,7 +164,7 @@ def remember_cycle_note(db_path: str | Path, draw: int, note: str) -> None:
 
 def load_cycle_notes(db_path: str | Path, limit: int = 10) -> list[dict[str, Any]]:
     _init_db(db_path)
-    with _connect(db_path) as conn:
+    with _connection_context(db_path) as conn:
         rows = conn.execute(
             """
             select draw, note, created_at
@@ -167,7 +184,7 @@ def load_cycle_notes(db_path: str | Path, limit: int = 10) -> list[dict[str, Any
 
 def summarize_audit_patterns(db_path: str | Path) -> dict[str, Any]:
     _init_db(db_path)
-    with _connect(db_path) as conn:
+    with _connection_context(db_path) as conn:
         total_theses = conn.execute("select count(*) from review_theses").fetchone()[0]
         total_cycle_notes = conn.execute("select count(*) from cycle_notes").fetchone()[0]
         draw_rows = conn.execute(
@@ -215,7 +232,7 @@ def save_thesis_portfolio(
         validate_output_json(candidate)
 
     _init_db(db_path)
-    with _connect(db_path) as conn:
+    with _connection_context(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute(
             "insert into thesis_portfolios (draw, game, notes) values (?, ?, ?)",
@@ -238,9 +255,9 @@ def save_thesis_portfolio(
                 """
                 insert into thesis_candidates (
                     portfolio_id, numbers, classification, state, sum, sum_band,
-                    block_signature, graph_support_score, pair_edges, evidence_draws,
+                    block_signature, graph_support_score, rank_score, pair_edges, evidence_draws,
                     notes, result_numbers, hits_count
-                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     portfolio_id,
@@ -251,6 +268,7 @@ def save_thesis_portfolio(
                     cand["sum_band"],
                     cand["block_signature"],
                     cand["graph_support_score"],
+                    cand.get("rank_score"),
                     pair_edges_str,
                     evidence_draws_str,
                     cand.get("notes", ""),
@@ -263,7 +281,7 @@ def save_thesis_portfolio(
 
 def load_thesis_portfolios(db_path: str | Path, limit: int = 10) -> list[dict[str, Any]]:
     _init_db(db_path)
-    with _connect(db_path) as conn:
+    with _connection_context(db_path) as conn:
         rows = conn.execute(
             """
             select id, draw, game, created_at, notes
@@ -288,11 +306,11 @@ def load_thesis_portfolios(db_path: str | Path, limit: int = 10) -> list[dict[st
 
 def load_thesis_candidates(db_path: str | Path, portfolio_id: int) -> list[dict[str, Any]]:
     _init_db(db_path)
-    with _connect(db_path) as conn:
+    with _connection_context(db_path) as conn:
         rows = conn.execute(
             """
             select id, portfolio_id, numbers, classification, state, sum, sum_band,
-                   block_signature, graph_support_score, pair_edges, evidence_draws,
+                   block_signature, graph_support_score, rank_score, pair_edges, evidence_draws,
                    notes, result_numbers, hits_count, created_at
             from thesis_candidates
             where portfolio_id = ?
@@ -311,12 +329,13 @@ def load_thesis_candidates(db_path: str | Path, portfolio_id: int) -> list[dict[
             "sum_band": row[6],
             "block_signature": row[7],
             "graph_support_score": row[8],
-            "pair_edges": json.loads(row[9]) if row[9] else [],
-            "evidence_draws": json.loads(row[10]) if row[10] else [],
-            "notes": row[11],
-            "result_numbers": json.loads(row[12]) if row[12] else None,
-            "hits_count": row[13],
-            "created_at": row[14],
+            "rank_score": row[9],
+            "pair_edges": json.loads(row[10]) if row[10] else [],
+            "evidence_draws": json.loads(row[11]) if row[11] else [],
+            "notes": row[12],
+            "result_numbers": json.loads(row[13]) if row[13] else None,
+            "hits_count": row[14],
+            "created_at": row[15],
         }
         for row in rows
     ]
@@ -329,7 +348,7 @@ def update_candidate_state(db_path: str | Path, candidate_id: int, state: str) -
         raise ValueError(f"Estado invalido: {state}. Debe ser uno de {valid_states}")
     validate_output_json(state)
     _init_db(db_path)
-    with _connect(db_path) as conn:
+    with _connection_context(db_path) as conn:
         conn.execute(
             "update thesis_candidates set state = ? where id = ?",
             (state, candidate_id),
@@ -346,7 +365,7 @@ def update_candidate_review_result(
         raise ValueError("hits_count debe ser un entero entre 0 y 6.")
     validate_output_json(result_numbers)
     _init_db(db_path)
-    with _connect(db_path) as conn:
+    with _connection_context(db_path) as conn:
         conn.execute(
             """
             update thesis_candidates

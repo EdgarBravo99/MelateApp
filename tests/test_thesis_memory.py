@@ -169,3 +169,62 @@ def test_portfolio_and_candidates_crud_round_trip(tmp_path):
     assert cands_reviewed[0]["result_numbers"] == [1, 2, 3, 10, 11, 12]
     assert cands_reviewed[0]["hits_count"] == 3
 
+
+def test_save_thesis_portfolio_with_score(tmp_path):
+    from melate_app_lab.thesis_memory import (
+        save_thesis_portfolio,
+        load_thesis_candidates,
+    )
+    db_path = tmp_path / "data" / "memory.sqlite"
+
+    candidates = [
+        {
+            "numbers": [1, 2, 3, 4, 5, 6],
+            "classification": "Balance por bloques",
+            "sum": 21,
+            "sum_band": "low_band",
+            "block_signature": "6-0-0-0-0",
+            "graph_support_score": 5,
+            "rank_score": 0.85,
+            "pair_edges": [],
+            "evidence_draws": [],
+        },
+        {
+            "numbers": [10, 20, 30, 40, 50, 56],
+            "classification": "Contraste / cobertura",
+            "sum": 206,
+            "sum_band": "high_tail",
+            "block_signature": "1-1-1-1-2",
+            "graph_support_score": 1,
+            "pair_edges": [],
+            "evidence_draws": [],
+        }
+    ]
+
+    pid = save_thesis_portfolio(
+        db_path, draw=4220, game="revancha", candidates=candidates, notes="Test portfolio"
+    )
+    
+    cands = load_thesis_candidates(db_path, pid)
+    assert len(cands) == 2
+    assert cands[0]["rank_score"] == 0.85
+    assert cands[1]["rank_score"] is None
+
+
+def test_thesis_memory_closes_all_connections(tmp_path):
+    from unittest.mock import patch, MagicMock
+    import melate_app_lab.thesis_memory as tm
+    db_path = tmp_path / "data" / "memory.sqlite"
+    
+    mock_conn = MagicMock()
+    mock_conn.__enter__.return_value = mock_conn
+    mock_conn.execute.return_value.fetchall.return_value = []
+    mock_conn.cursor.return_value.lastrowid = 1
+    
+    with patch("melate_app_lab.thesis_memory._connect", return_value=mock_conn) as mock_connect:
+        tm.remember_review_thesis(db_path, 4218, "Tesis de revision: valida.")
+        mock_connect.assert_called()
+        mock_conn.close.assert_called()
+
+
+
