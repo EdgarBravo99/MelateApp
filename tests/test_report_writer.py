@@ -187,3 +187,40 @@ def test_write_historical_graph_html(tmp_path):
     validate_text(content)
 
 
+def test_write_consolidated_portfolio_report_html(tmp_path):
+    from melate_app_lab.report_writer import write_consolidated_portfolio_report_html
+    from melate_app_lab.number_utils import analyze_portfolio_redundancy
+
+    portfolio = {
+        "id": 1,
+        "draw": 4220,
+        "game": "revancha",
+        "notes": "Test notes",
+        "created_at": "2026-05-29",
+    }
+    candidates = [
+        {
+            "letter": "A",
+            "numbers": [1, 2, 3, 4, 5, 16],
+            "classification": "Balance por bloques",
+            "sum": 31,
+            "sum_band": "low_band",
+            "block_signature": "5-1-0-0-0",
+            "graph_support_score": 10,
+            "reason_bullets": ["cubre bloques", "suma adecuada"],
+            "pair_edges": [{"pair": "1—2", "count": 2}],
+            "state": "Pendiente",
+        }
+    ]
+    redundancy = analyze_portfolio_redundancy(candidates)
+
+    html_path = tmp_path / "portfolio_report.html"
+    write_consolidated_portfolio_report_html(portfolio, candidates, redundancy, html_path)
+
+    content = html_path.read_text(encoding="utf-8")
+    assert "Reporte de Cartera de Tesis" in content
+    assert "MelateApp Lab v1.0" in content
+    assert "REVANCHA" in content
+    assert "4220" in content
+    assert "Balance por bloques" in content
+    assert "Set A" in content

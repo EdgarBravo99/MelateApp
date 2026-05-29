@@ -29,6 +29,7 @@ def launch_desktop() -> int:
             QApplication,
             QAbstractItemView,
             QButtonGroup,
+            QCheckBox,
             QComboBox,
             QFrame,
             QFileDialog,
@@ -500,7 +501,16 @@ def launch_desktop() -> int:
         except Exception as e:
             log(f"Error: {e}")
 
+    def start_revision_completa():
+        try:
+            draw_text = draw_input.text().strip()
+            draw = int(draw_text) if draw_text else None
+            run_action("Revisión Completa", lambda: controller.run_revision_completa(DEFAULT_DB_PATH, count=10, game="revancha", draw=draw), True)
+        except Exception as e:
+            log(f"Error: {e}")
+
     actions_config = [
+        ("Revisión Completa", start_revision_completa),
         ("Trace", start_trace),
         ("Postmortem", start_postmortem),
         ("Stress Review", start_stress_review),
@@ -623,6 +633,191 @@ def launch_desktop() -> int:
     candidates_layout.addWidget(QLabel("Resultados de Tesis y Candidatos:"))
     candidates_layout.addWidget(candidates_output, 1)
 
+    # PORTFOLIO PAGE
+    portfolio_page, portfolio_layout = make_page()
+
+    portfolio_splitter = QHBoxLayout()
+    portfolio_splitter.setSpacing(16)
+
+    # Left side panel: Portfolios
+    left_panel = QFrame()
+    left_panel.setObjectName("Panel")
+    left_layout = QVBoxLayout(left_panel)
+    left_layout.addWidget(QLabel("Historial de Carteras Generadas:"))
+
+    portfolios_table = QTableWidget(0, 4)
+    portfolios_table.setObjectName("DataTable")
+    portfolios_table.setHorizontalHeaderLabels(["ID", "Sorteo", "Juego", "Fecha"])
+    portfolios_table.verticalHeader().setVisible(False)
+    portfolios_table.setAlternatingRowColors(True)
+    portfolios_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+    portfolios_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+    portfolios_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+    left_layout.addWidget(portfolios_table, 1)
+
+    refresh_portfolios_btn = QPushButton("Actualizar Lista")
+    left_layout.addWidget(refresh_portfolios_btn)
+
+    portfolio_splitter.addWidget(left_panel, 2)
+
+    # Right side panel: Candidates in Portfolio
+    right_panel = QFrame()
+    right_panel.setObjectName("Panel")
+    right_layout = QVBoxLayout(right_panel)
+    right_layout.addWidget(QLabel("Candidatos del Portfolio Seleccionado:"))
+
+    portfolio_candidates_table = QTableWidget(0, 7)
+    portfolio_candidates_table.setObjectName("DataTable")
+    portfolio_candidates_table.setHorizontalHeaderLabels(["ID", "Letra", "Números", "Perfil", "Soporte", "Estado", "Aciertos"])
+    portfolio_candidates_table.verticalHeader().setVisible(False)
+    portfolio_candidates_table.setAlternatingRowColors(True)
+    portfolio_candidates_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+    portfolio_candidates_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+    portfolio_candidates_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+    right_layout.addWidget(portfolio_candidates_table, 1)
+
+    # Candidate control bar
+    candidate_actions = QHBoxLayout()
+    state_combo = QComboBox()
+    state_combo.addItems(["Pendiente", "Favorito", "Jugado", "Descartado"])
+    change_state_btn = QPushButton("Cambiar Estado")
+
+    eval_portfolio_btn = QPushButton("Probar contra Histórico")
+    eval_portfolio_btn.setObjectName("PrimaryAction")
+    view_portfolio_report_btn = QPushButton("Ver Reporte de Cartera")
+
+    candidate_actions.addWidget(QLabel("Estado:"))
+    candidate_actions.addWidget(state_combo)
+    candidate_actions.addWidget(change_state_btn)
+    candidate_actions.addWidget(eval_portfolio_btn)
+    candidate_actions.addWidget(view_portfolio_report_btn)
+    candidate_actions.addStretch(1)
+
+    right_layout.addLayout(candidate_actions)
+
+    portfolio_splitter.addWidget(right_panel, 3)
+    portfolio_layout.addLayout(portfolio_splitter)
+
+    action_buttons.extend([refresh_portfolios_btn, change_state_btn, eval_portfolio_btn, view_portfolio_report_btn])
+
+    def refresh_portfolios():
+        try:
+            records = controller.load_portfolios_list(DEFAULT_DB_PATH)
+            portfolios_table.setRowCount(len(records))
+            for row, record in enumerate(records):
+                portfolios_table.setItem(row, 0, table_item(record["id"]))
+                portfolios_table.setItem(row, 1, table_item(record["draw"]))
+                portfolios_table.setItem(row, 2, table_item(record["game"]))
+                portfolios_table.setItem(row, 3, table_item(record["created_at"]))
+
+            portfolio_candidates_table.setRowCount(0)
+        except Exception as e:
+            log(f"Error cargando carteras: {e}")
+
+    def on_portfolio_selected():
+        row = portfolios_table.currentRow()
+        if row < 0:
+            return
+        try:
+            pid = int(portfolios_table.item(row, 0).text())
+            refresh_candidates(pid)
+        except Exception as e:
+            log(f"Error cargando candidatos: {e}")
+
+    def refresh_candidates(pid: int):
+        try:
+            cands = controller.load_portfolio_candidates(DEFAULT_DB_PATH, pid)
+            portfolio_candidates_table.setRowCount(len(cands))
+            for row, cand in enumerate(cands):
+                portfolio_candidates_table.setItem(row, 0, table_item(cand["id"]))
+                letter = cand.get("letter") or chr(ord('A') + row)
+                portfolio_candidates_table.setItem(row, 1, table_item(letter))
+                nums_text = " ".join(str(n) for n in cand["numbers"])
+                portfolio_candidates_table.setItem(row, 2, table_item(nums_text))
+                portfolio_candidates_table.setItem(row, 3, table_item(cand["classification"]))
+                portfolio_candidates_table.setItem(row, 4, table_item(cand["graph_support_score"]))
+                portfolio_candidates_table.setItem(row, 5, table_item(cand["state"]))
+
+                hits = cand.get("hits_count")
+                hits_str = str(hits) if hits is not None else "-"
+                portfolio_candidates_table.setItem(row, 6, table_item(hits_str))
+        except Exception as e:
+            log(f"Error cargando candidatos: {e}")
+
+    portfolios_table.itemSelectionChanged.connect(on_portfolio_selected)
+    refresh_portfolios_btn.clicked.connect(refresh_portfolios)
+
+    def change_state_clicked():
+        row = portfolio_candidates_table.currentRow()
+        if row < 0:
+            QMessageBox.warning(window, "Advertencia", "Selecciona un candidato de la tabla.")
+            return
+        try:
+            cand_id = int(portfolio_candidates_table.item(row, 0).text())
+            new_state = state_combo.currentText()
+            controller.change_candidate_state(DEFAULT_DB_PATH, cand_id, new_state)
+            log(f"Estado de candidato {cand_id} cambiado a {new_state}.")
+
+            p_row = portfolios_table.currentRow()
+            if p_row >= 0:
+                pid = int(portfolios_table.item(p_row, 0).text())
+                refresh_candidates(pid)
+        except Exception as e:
+            log(f"Error al cambiar estado: {e}")
+
+    change_state_btn.clicked.connect(change_state_clicked)
+
+    def eval_portfolio_clicked():
+        row = portfolios_table.currentRow()
+        if row < 0:
+            QMessageBox.warning(window, "Advertencia", "Selecciona una cartera de la tabla de carteras.")
+            return
+        try:
+            pid = int(portfolios_table.item(row, 0).text())
+
+            def run_eval():
+                res = controller.evaluate_portfolio_against_history(DEFAULT_DB_PATH, pid)
+                return res
+
+            def on_eval_done(res):
+                QMessageBox.information(window, "Evaluación Completa", res.get("message", "Evaluado con éxito."))
+                refresh_candidates(pid)
+
+            run_action("Probar Cartera", run_eval, True, on_eval_done)
+        except Exception as e:
+            log(f"Error al evaluar cartera: {e}")
+
+    eval_portfolio_btn.clicked.connect(eval_portfolio_clicked)
+
+    def view_portfolio_report_clicked():
+        row = portfolios_table.currentRow()
+        if row < 0:
+            QMessageBox.warning(window, "Advertencia", "Selecciona una cartera de la tabla de carteras.")
+            return
+        try:
+            pid = int(portfolios_table.item(row, 0).text())
+            draw = int(portfolios_table.item(row, 1).text())
+            report_path = Path("outputs") / f"portfolio_report_{draw}.html"
+            if report_path.exists():
+                controller.open_report(report_path)
+            else:
+                cands = controller.load_portfolio_candidates(DEFAULT_DB_PATH, pid)
+                from .thesis_memory import load_thesis_portfolios
+                ports = controller.load_portfolios_list(DEFAULT_DB_PATH)
+                port = next((p for p in ports if p["id"] == pid), None)
+                if not port:
+                    raise ValueError("Portfolio no encontrado.")
+                from .number_utils import analyze_portfolio_redundancy
+                redundancy = analyze_portfolio_redundancy(cands)
+                from .report_writer import write_consolidated_portfolio_report_html
+                write_consolidated_portfolio_report_html(port, cands, redundancy, report_path)
+                controller.open_report(report_path)
+                log(f"Reporte de cartera generado y abierto en {report_path}.")
+        except Exception as e:
+            log(f"Error al abrir reporte de cartera: {e}")
+
+    view_portfolio_report_btn.clicked.connect(view_portfolio_report_clicked)
+
     # SETTINGS PAGE
     settings_page, settings_layout = make_page()
     settings_panel = QFrame()
@@ -679,10 +874,121 @@ def launch_desktop() -> int:
     settings_layout.addWidget(settings_panel)
     settings_layout.addStretch(1)
 
+    # BACKTEST PAGE
+    backtest_page, backtest_layout = make_page()
+    backtest_panel = QFrame()
+    backtest_panel.setObjectName("Panel")
+    backtest_grid = QGridLayout(backtest_panel)
+    backtest_grid.setContentsMargins(18, 18, 18, 18)
+    backtest_grid.setHorizontalSpacing(16)
+    backtest_grid.setVerticalSpacing(12)
+
+    backtest_game_combo = QComboBox()
+    backtest_game_combo.addItems(["revancha", "melate"])
+
+    backtest_limit_combo = QComboBox()
+    backtest_limit_combo.addItems(["10", "20", "50", "100"])
+
+    backtest_pool_combo = QComboBox()
+    backtest_pool_combo.addItems(["100", "200", "500"])
+
+    backtest_seed_input = QLineEdit("42")
+    
+    backtest_ml_check = QCheckBox("Usar Machine Learning (Ridge Regression)")
+    if not controller.is_ml_supported():
+        backtest_ml_check.setEnabled(False)
+        backtest_ml_check.setToolTip("Instala scikit-learn para habilitar el ranking ML.")
+
+    run_backtest_btn = QPushButton("Ejecutar Backtesting Estructural")
+    run_backtest_btn.setObjectName("PrimaryAction")
+    
+    open_backtest_report_btn = QPushButton("Ver Reporte de Backtest")
+    open_backtest_report_btn.setEnabled(False)
+
+    backtest_grid.addWidget(QLabel("Juego:"), 0, 0)
+    backtest_grid.addWidget(backtest_game_combo, 0, 1)
+    backtest_grid.addWidget(QLabel("Sorteos a evaluar:"), 1, 0)
+    backtest_grid.addWidget(backtest_limit_combo, 1, 1)
+    backtest_grid.addWidget(QLabel("Tamaño del pool:"), 2, 0)
+    backtest_grid.addWidget(backtest_pool_combo, 2, 1)
+    backtest_grid.addWidget(QLabel("Semilla aleatoria:"), 3, 0)
+    backtest_grid.addWidget(backtest_seed_input, 3, 1)
+    backtest_grid.addWidget(backtest_ml_check, 4, 0, 1, 2)
+    
+    backtest_actions = QHBoxLayout()
+    backtest_actions.addWidget(run_backtest_btn)
+    backtest_actions.addWidget(open_backtest_report_btn)
+    backtest_actions.addStretch()
+    backtest_grid.addLayout(backtest_actions, 5, 0, 1, 2)
+    backtest_grid.setColumnStretch(1, 1)
+
+    backtest_output = QPlainTextEdit()
+    backtest_output.setObjectName("ActivityConsole")
+    backtest_output.setReadOnly(True)
+
+    backtest_layout.addWidget(backtest_panel)
+    backtest_layout.addWidget(QLabel("Métricas de Evaluación Retrospectiva:"))
+    backtest_layout.addWidget(backtest_output, 1)
+
+    action_buttons.extend([run_backtest_btn, open_backtest_report_btn])
+
+    last_backtest_report_path: dict[str, str | None] = {"path": None}
+
+    def start_backtest():
+        try:
+            game = backtest_game_combo.currentText()
+            limit = int(backtest_limit_combo.currentText())
+            pool_size = int(backtest_pool_combo.currentText())
+            seed = int(backtest_seed_input.text())
+            use_ml = backtest_ml_check.isChecked()
+
+            def run_b():
+                return controller.run_backtest_lab(
+                    DEFAULT_DB_PATH,
+                    limit=limit,
+                    game=game,
+                    pool_size=pool_size,
+                    top_k=10,
+                    seed=seed,
+                    use_ml=use_ml,
+                )
+
+            def on_b_done(res):
+                last_backtest_report_path["path"] = res.get("html_path")
+                open_backtest_report_btn.setEnabled(True)
+                
+                metrics = res.get("metrics", {})
+                summary_text = (
+                    f"BACKTESTING COMPLETADO ({game.upper()})\n"
+                    f"===================================\n"
+                    f"Sorteos evaluados: {metrics.get('draws_evaluated', 0)}\n\n"
+                    f"--- Métricas del Ranker Estructural ---\n"
+                    f"Promedio Máximo Aciertos (Top 10): {metrics.get('avg_ranker_top_k_max_hits', 0.0)}\n"
+                    f"Promedio Medio Aciertos (Top 10): {metrics.get('avg_ranker_top_k_mean_hits', 0.0)}\n"
+                    f"Tasa >= 3 Aciertos: {metrics.get('ranker_3plus_rate', 0.0)}%\n"
+                    f"Tasa >= 4 Aciertos: {metrics.get('ranker_4plus_rate', 0.0)}%\n\n"
+                    f"--- Métricas del Baseline Aleatorio ---\n"
+                    f"Promedio Máximo Aciertos (Top 10): {metrics.get('avg_baseline_top_k_max_hits', 0.0)}\n"
+                    f"Promedio Medio Aciertos (Top 10): {metrics.get('avg_baseline_top_k_mean_hits', 0.0)}\n"
+                    f"Tasa >= 3 Aciertos: {metrics.get('baseline_3plus_rate', 0.0)}%\n"
+                    f"Tasa >= 4 Aciertos: {metrics.get('baseline_4plus_rate', 0.0)}%\n"
+                )
+                backtest_output.setPlainText(summary_text)
+                log(f"Backtesting completado para los últimos {limit} sorteos.")
+
+            run_action("Ejecutar Backtest", run_b, True, on_b_done)
+        except Exception as e:
+            log(f"Error: {e}")
+
+    run_backtest_btn.clicked.connect(start_backtest)
+    open_backtest_report_btn.clicked.connect(lambda: controller.open_report(last_backtest_report_path["path"]))
+
     pages = [
         ("Nuevo analisis", "Ejecuta revisiones locales, guarda memoria y genera reportes sin salir del escritorio.", analysis_page),
         ("Historial", "Importa sorteos previos y revisa la memoria local en tabla.", history_page),
         ("Candidatos", "Genera combinaciones candidatas y tesis analitica basada en historial.", candidates_page),
+        ("Cartera de Tesis", "Administra las tesis guardadas y evalúa aciertos retrospectivamente.", portfolio_page),
+        ("ML Lab & Backtest", "Ejecuta evaluaciones retrospectivas contra el historial descriptivo.", backtest_page),
         ("Reportes", "Consulta archivos exportados y abre reportes generados.", reports_page),
         ("Configuracion", "Rutas y tareas operativas para el laboratorio local.", settings_page),
     ]
@@ -696,6 +1002,8 @@ def launch_desktop() -> int:
             run_action("Actualizar historial", refresh_history_table, False)
         elif title == "Reportes":
             run_action("Actualizar reportes", refresh_reports_table, False)
+        elif title == "Cartera de Tesis":
+            run_action("Actualizar carteras", refresh_portfolios, False)
 
     for index, (label, _subtitle, page) in enumerate(pages):
         nav_button = QPushButton(label)
