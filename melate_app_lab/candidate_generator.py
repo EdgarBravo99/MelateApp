@@ -182,12 +182,12 @@ def generate_candidates(
         elif match_pairs >= 2:
             classification = "Relacion historica moderada"
             reason_bullets = [
-                f"conserva {match_pairs} conexiones observadas en la ventana",
+                f"conserva {match_pairs} coapariciones internas observadas en la ventana histórica",
                 f"mezcla numeros de alta ({hot_count}) y baja ({cold_count}) recurrencia",
-                f"firma coincide con zona de exito historico ({sig})"
+                f"firma observada en la ventana histórica ({sig})"
             ]
         else:
-            classification = "Cadencia y Ciclos"
+            classification = "Contraste / cobertura"
             reason_bullets = [
                 f"balance temporal optimo: {hot_count} calientes, {cold_count} frios",
                 f"suma total de {sum(ticket)} en rango {band}",
@@ -235,44 +235,87 @@ def generate_candidates(
             "evidence_draws": evidence_draws,
             "relation_window": graph_window,
         })
-        
-        if len(candidates) >= count:
-            break
             
-    # Sort candidates so we return exactly the requested count, or pad if we didn't get enough
+    # Sort candidates by graph support score descending, and take the requested count
+    candidates = sorted(candidates, key=lambda c: c.get("graph_support_score", 0), reverse=True)
     return candidates[:count]
 
 def format_candidates_report(candidates: list[dict[str, Any]]) -> str:
+    # First, sort candidates by graph support score descending to establish ranking letters
+    candidates = sorted(candidates, key=lambda c: c.get("graph_support_score", 0), reverse=True)
+    # Then make sure they have letters
+    for idx, cand in enumerate(candidates):
+        cand["letter"] = chr(ord('A') + idx)
+
     lines = []
-    lines.append("Tesis de revision para siguiente ciclo\n")
-    for i, cand in enumerate(candidates):
-        letter = chr(ord('A') + i)
-        lines.append(f"Set {letter} — {cand['classification']}")
-        lines.append(" ".join(str(n) for n in cand["numbers"]))
+    lines.append("Tesis de revision para siguiente ciclo")
+    lines.append("======================================\n")
 
-        # Graph support section
-        pair_edges = cand.get("pair_edges", [])
-        score = cand.get("graph_support_score", 0)
-        window = cand.get("relation_window", 0)
-        if score > 0:
+    # Resumen de candidatos arriba
+    lines.append("Resumen de Candidatos:")
+    
+    # Sort for ranking text (sets with score > 0)
+    ranked = [c for c in candidates if c.get("graph_support_score", 0) > 0]
+    if ranked:
+        ranked_str = ", ".join(f"Set {c['letter']} (soporte: {c['graph_support_score']})" for c in ranked)
+    else:
+        ranked_str = "Ninguno"
+    lines.append(f"- Sets con mayor soporte de grafo: {ranked_str}")
+
+    # Categorize sets
+    balance_sets = [f"Set {c['letter']}" for c in candidates if c.get("classification") == "Balance por bloques"]
+    relation_sets = [f"Set {c['letter']}" for c in candidates if c.get("classification") == "Relacion historica moderada"]
+    contrast_sets = [f"Set {c['letter']}" for c in candidates if c.get("classification") == "Contraste / cobertura"]
+
+    lines.append(f"- Sets de balance por bloques: {', '.join(balance_sets) if balance_sets else 'Ninguno'}")
+    lines.append(f"- Sets de relación histórica: {', '.join(relation_sets) if relation_sets else 'Ninguno'}")
+    lines.append(f"- Sets de contraste / cobertura: {', '.join(contrast_sets) if contrast_sets else 'Ninguno'}\n")
+
+    lines.append("Nota de lectura: El soporte de grafo indica coapariciones históricas dentro de la ventana; no implica una confirmación definitiva.\n")
+
+    # Group by profile
+    profiles = [
+        ("Perfil Balance por bloques", "Balance por bloques"),
+        ("Perfil Relación histórica moderada", "Relacion historica moderada"),
+        ("Perfil Contraste / cobertura", "Contraste / cobertura"),
+    ]
+
+    for title, key in profiles:
+        sets = [c for c in candidates if c.get("classification") == key]
+        if not sets:
+            continue
+        lines.append(title)
+        lines.append("-" * len(title))
+        for cand in sets:
+            lines.append(f"Set {cand['letter']} — {cand['classification']}")
+            lines.append(" ".join(str(n) for n in cand["numbers"]))
+
+            # Graph support section
+            pair_edges = cand.get("pair_edges", [])
+            score = cand.get("graph_support_score", 0)
+            window = cand.get("relation_window", 0)
+            if score > 0:
+                lines.append("")
+                lines.append("Soporte de grafo:")
+                lines.append(f"- graph_support_score: {score}")
+                if window:
+                    lines.append(f"- ventana: ultimos {window} sorteos")
+                lines.append("- conexiones internas:")
+                for pe in pair_edges:
+                    lines.append(f"  - {pe['pair']} observado {pe['count']} veces")
+                ev_draws = cand.get("evidence_draws", [])
+                if ev_draws:
+                    lines.append("- evidencia en sorteos:")
+                    for d in ev_draws:
+                        lines.append(f"  - {d}")
+
             lines.append("")
-            lines.append("Soporte de grafo:")
-            lines.append(f"- graph_support_score: {score}")
-            if window:
-                lines.append(f"- ventana: ultimos {window} sorteos")
-            lines.append("- conexiones internas:")
-            for pe in pair_edges:
-                lines.append(f"  - {pe['pair']} observado {pe['count']} veces")
-            ev_draws = cand.get("evidence_draws", [])
-            if ev_draws:
-                lines.append("- evidencia en sorteos:")
-                for d in ev_draws:
-                    lines.append(f"  - {d}")
+            lines.append("Motivo:")
+            for bullet in cand["reason_bullets"]:
+                lines.append(f"- {bullet}")
+            lines.append("")
+        lines.append("")
 
-        lines.append("")
-        lines.append("Motivo:")
-        for bullet in cand["reason_bullets"]:
-            lines.append(f"- {bullet}")
-        lines.append("")
     return "\n".join(lines)
+
 

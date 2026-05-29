@@ -294,10 +294,14 @@ def run_historical_graph(db_path: str | Path = DEFAULT_DB_PATH, window: int = 30
     from .historical_store import load_draw_history
     from .relation_graph import build_historical_relation_graph
     from .report_writer import write_graph_html_report
+    from .candidate_generator import analyze_time_window, generate_candidates
     history = load_draw_history(db_path)
     if not history:
         raise ValueError("No hay historial en la memoria para generar el grafo. Importa resultados primero.")
     graph_data = build_historical_relation_graph(history, window=window, game="revancha")
+    analysis = analyze_time_window(history, window=window)
+    candidates = generate_candidates(analysis, count=10, graph_data=graph_data)
+    graph_data["candidates"] = candidates
     html_path = Path("outputs") / "historical_graph.html"
     write_graph_html_report(graph_data, html_path)
     open_report(html_path)

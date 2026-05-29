@@ -642,6 +642,7 @@ def _write_historical_graph_html(graph_data: dict[str, Any], output_path: str | 
 
     nodes = graph_data.get("nodes", [])
     edges = graph_data.get("edges", [])
+    candidates = graph_data.get("candidates", [])
 
     # Build Cytoscape elements
     max_freq = max((n.get("frequency", 1) for n in nodes), default=1)
@@ -697,6 +698,8 @@ def _write_historical_graph_html(graph_data: dict[str, Any], output_path: str | 
         f"<td>{html.escape(str(e.get('draws', [])[:3]))}</td></tr>"
         for e in edges_sorted[:30]
     )
+
+    candidates_json = json.dumps(candidates)
 
     html_content = f"""<!doctype html>
 <html lang="es">
@@ -794,11 +797,37 @@ def _write_historical_graph_html(graph_data: dict[str, Any], output_path: str | 
     <div id="cy"></div>
     <div id="sidebar">
       <div class="panel-section">
+        <h2>Controles del Grafo</h2>
+        <div class="control-group" style="margin-bottom: 12px;">
+          <label for="min-cooccurrence" class="detail-label" style="display: block; margin-bottom: 4px;">Mostrar conexiones con mínimo coapariciones</label>
+          <select id="min-cooccurrence" style="width: 100%; background: #1f2937; border: 1px solid var(--panel-border); color: #fff; padding: 6px; border-radius: 4px; font-family: var(--font);" onchange="updateGraph()">
+            <option value="1">1+</option>
+            <option value="2" selected>2+</option>
+            <option value="3">3+</option>
+            <option value="4">4+</option>
+          </select>
+        </div>
+        <div class="control-group" style="margin-bottom: 12px;">
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; cursor: pointer; color: var(--text-muted);">
+            <input type="checkbox" id="hide-isolated" onchange="updateGraph()" checked>
+            <span>Ocultar números sin conexiones</span>
+          </label>
+        </div>
+        <div class="control-group">
+          <label for="resaltar-set" class="detail-label" style="display: block; margin-bottom: 4px;">Resaltar Set de Tesis</label>
+          <select id="resaltar-set" style="width: 100%; background: #1f2937; border: 1px solid var(--panel-border); color: #fff; padding: 6px; border-radius: 4px; font-family: var(--font);" onchange="updateGraph()">
+            <option value="none" selected>Ninguno</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="panel-section">
         <h2>Detalle de Seleccion</h2>
         <div id="details-content">
           <p style="color: var(--text-muted); font-style: italic;">Haz clic en un numero o una conexion para ver detalles de coaparicion historica.</p>
         </div>
       </div>
+      
       <div class="panel-section">
         <h2>Leyenda</h2>
         <div style="font-size:0.85rem; margin-bottom:8px;">
@@ -806,6 +835,9 @@ def _write_historical_graph_html(graph_data: dict[str, Any], output_path: str | 
         </div>
         <div style="font-size:0.85rem; margin-bottom:8px;">
           <strong style="color:var(--accent2);">Arista gruesa</strong> = coaparicion frecuente
+        </div>
+        <div style="font-size:0.85rem; margin-bottom:8px;">
+          <strong style="color:#a855f7;">Color Morado</strong> = Elementos del Set resaltado
         </div>
         <div style="font-size:0.85rem;">
           Ventana: ultimos <strong>{window}</strong> sorteos
@@ -839,6 +871,17 @@ def _write_historical_graph_html(graph_data: dict[str, Any], output_path: str | 
         edges: {json.dumps(edges_js)}
       }};
 
+      const candidates = {candidates_json};
+
+      // Populate sets dropdown dynamically
+      const setSelect = document.getElementById('resaltar-set');
+      candidates.forEach((cand, idx) => {{
+        const option = document.createElement('option');
+        option.value = String(idx);
+        option.textContent = `Set ${{cand.letter || String.fromCharCode(65 + idx)}} (${{cand.classification}})`;
+        setSelect.appendChild(option);
+      }});
+
       const cy = cytoscape({{
         container: document.getElementById('cy'),
         elements: [
@@ -859,7 +902,9 @@ def _write_historical_graph_html(graph_data: dict[str, Any], output_path: str | 
               'width': 'data(size)',
               'height': 'data(size)',
               'border-width': '2px',
-              'border-color': '#92400e'
+              'border-color': '#92400e',
+              'transition-property': 'background-color, border-color, border-width, opacity',
+              'transition-duration': '0.2s'
             }}
           }},
           {{
@@ -869,7 +914,9 @@ def _write_historical_graph_html(graph_data: dict[str, Any], output_path: str | 
               'line-color': '#10b981',
               'target-arrow-shape': 'none',
               'curve-style': 'bezier',
-              'opacity': 0.5
+              'opacity': 0.5,
+              'transition-property': 'line-color, width, opacity',
+              'transition-duration': '0.2s'
             }}
           }},
           {{
@@ -885,6 +932,29 @@ def _write_historical_graph_html(graph_data: dict[str, Any], output_path: str | 
               'line-color': '#fbbf24',
               'opacity': 1.0
             }}
+          }},
+          {{
+            selector: '.dimmed',
+            style: {{
+              'opacity': 0.12
+            }}
+          }},
+          {{
+            selector: '.highlighted-node',
+            style: {{
+              'background-color': '#a855f7',
+              'border-color': '#c084fc',
+              'border-width': '4px',
+              'opacity': 1.0
+            }}
+          }},
+          {{
+            selector: '.highlighted-edge',
+            style: {{
+              'line-color': '#a855f7',
+              'opacity': 1.0,
+              'width': function(edge) {{ return edge.data('width') + 2; }}
+            }}
           }}
         ],
         layout: {{
@@ -896,6 +966,149 @@ def _write_historical_graph_html(graph_data: dict[str, Any], output_path: str | 
           padding: 40
         }}
       }});
+
+      function showSetDetails(index) {{
+        const cand = candidates[index];
+        const letter = cand.letter || String.fromCharCode(65 + index);
+        const detailsDiv = document.getElementById('details-content');
+
+        let connectionsHtml = '';
+        if (cand.pair_edges && cand.pair_edges.length > 0) {{
+          connectionsHtml = cand.pair_edges.map(pe => 
+            `<li><strong>${{pe.pair}}</strong>: coaparece ${{pe.count}} veces</li>`
+          ).join('');
+        }} else {{
+          connectionsHtml = '<li>Ninguna conexión interna en la ventana</li>';
+        }}
+
+        let evidenceHtml = '';
+        if (cand.evidence_draws && cand.evidence_draws.length > 0) {{
+          evidenceHtml = cand.evidence_draws.map(d => `<code>${{d}}</code>`).join(', ');
+        }} else {{
+          evidenceHtml = 'Ninguna';
+        }}
+
+        detailsDiv.innerHTML = `
+          <div class="detail-item" style="border-bottom: 1px solid var(--panel-border); padding-bottom: 8px; margin-bottom: 8px;">
+            <div class="detail-label" style="color: #c084fc;">Detalles del Set</div>
+            <div class="detail-value" style="font-size: 1.3rem; font-weight: bold; color: #fff;">Set ${{letter}}</div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Perfil</div>
+            <div class="detail-value" style="color: var(--accent2); font-weight: 600;">${{cand.classification}}</div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Números del Set</div>
+            <div class="detail-value" style="font-size: 1.1rem; font-weight: bold; letter-spacing: 1px; margin-top: 4px;">
+              ${{cand.numbers.join(' ')}}
+            </div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Soporte de Grafo Score</div>
+            <div class="detail-value" style="font-size: 1.2rem; color: #f59e0b; font-weight: bold;">${{cand.graph_support_score}}</div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Conexiones Internas</div>
+            <ul style="margin: 4px 0; padding-left: 16px; font-size: 0.85rem; line-height: 1.4;">
+              ${{connectionsHtml}}
+            </ul>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Evidencia Histórica (Sorteos)</div>
+            <div class="detail-value" style="font-size: 0.85rem;">
+              ${{evidenceHtml}}
+            </div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Suma / Banda</div>
+            <div class="detail-value">Suma: ${{cand.sum}} (${{cand.sum_band}})</div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Firma de Bloques</div>
+            <div class="detail-value"><code>${{cand.block_signature}}</code></div>
+          </div>
+        `;
+      }}
+
+      window.updateGraph = function() {{
+        const minCount = parseInt(document.getElementById('min-cooccurrence').value);
+        const hideIsolated = document.getElementById('hide-isolated').checked;
+        const selectedSetIndex = document.getElementById('resaltar-set').value;
+
+        let setNumbers = null;
+        if (selectedSetIndex !== 'none') {{
+          const setObj = candidates[parseInt(selectedSetIndex)];
+          setNumbers = new Set(setObj.numbers);
+        }}
+
+        cy.batch(() => {{
+          // Remove custom classes
+          cy.elements().removeClass('dimmed highlighted-node highlighted-edge');
+
+          // Apply minimum co-occurrence filter on edges
+          cy.edges().forEach(e => {{
+            const cnt = e.data('count');
+            if (cnt < minCount) {{
+              e.style('display', 'none');
+            }} else {{
+              e.style('display', 'element');
+            }}
+          }});
+
+          // Handle isolated nodes hiding
+          cy.nodes().forEach(n => {{
+            if (hideIsolated) {{
+              // Count how many visible edges connect to this node
+              const connectedVisibleEdges = n.connectedEdges().filter(e => e.data('count') >= minCount);
+              if (connectedVisibleEdges.length === 0) {{
+                n.style('display', 'none');
+              }} else {{
+                n.style('display', 'element');
+              }}
+            }} else {{
+              n.style('display', 'element');
+            }}
+          }});
+
+          // Apply thesis set highlighting overlay
+          if (selectedSetIndex !== 'none') {{
+            // Dim everything
+            cy.elements().addClass('dimmed');
+
+            // Highlight nodes in the Set
+            cy.nodes().forEach(n => {{
+              const num = n.data('number');
+              if (setNumbers.has(num)) {{
+                n.removeClass('dimmed');
+                n.addClass('highlighted-node');
+              }}
+            }});
+
+            // Highlight internal edges in the Set
+            cy.edges().forEach(e => {{
+              const src = parseInt(e.data('source'));
+              const tgt = parseInt(e.data('target'));
+              const cnt = e.data('count');
+              if (cnt >= minCount && setNumbers.has(src) && setNumbers.has(tgt)) {{
+                e.removeClass('dimmed');
+                e.addClass('highlighted-edge');
+              }}
+            }});
+          }}
+        }});
+
+        if (selectedSetIndex !== 'none') {{
+          showSetDetails(parseInt(selectedSetIndex));
+        }} else {{
+          const detailsDiv = document.getElementById('details-content');
+          if (detailsDiv.innerHTML.includes('Detalles del Set')) {{
+            detailsDiv.innerHTML = '<p style="color: var(--text-muted); font-style: italic;">Haz clic en un numero o una conexion para ver detalles de coaparicion historica.</p>';
+          }}
+        }}
+      }};
+
+      // Initial filter apply
+      updateGraph();
 
       cy.on('tap', function(evt) {{
         const target = evt.target;
@@ -913,6 +1126,34 @@ def _write_historical_graph_html(graph_data: dict[str, Any], output_path: str | 
           const deg = target.data('degree');
           const wdeg = target.data('weighted_degree');
           const lastSeen = target.data('last_seen_draws') || [];
+
+          // Find appearing sets
+          const appearingSets = [];
+          candidates.forEach((cand, idx) => {{
+            if (cand.numbers.includes(num)) {{
+              appearingSets.push(`Set ${{cand.letter || String.fromCharCode(65 + idx)}}`);
+            }}
+          }});
+          const setsText = appearingSets.length > 0 ? appearingSets.join(', ') : 'Ninguno';
+
+          // Find top connections in JS
+          const nodeIdStr = String(num);
+          const nodeEdges = elements.edges.filter(e => e.data.source === nodeIdStr || e.data.target === nodeIdStr);
+          nodeEdges.sort((a, b) => b.data.count - a.data.count);
+          const topEdges = nodeEdges.slice(0, 3);
+          let topConnHtml = '';
+          if (topEdges.length > 0) {{
+            topConnHtml = topEdges.map(e => {{
+              const peer = e.data.source === nodeIdStr ? e.data.target : e.data.source;
+              const drawsSlice = (e.data.draws || []).slice(-3).reverse();
+              return `<div style="font-size: 0.85rem; margin-bottom: 4px;">
+                &bull; Con <strong>${{peer}}</strong>: coaparece ${{e.data.count}} veces 
+                <span style="color: var(--text-muted); font-size: 0.75rem;">(Sorteos: ${{drawsSlice.join(', ')}})</span>
+              </div>`;
+            }}).join('');
+          }} else {{
+            topConnHtml = '<div style="font-size: 0.85rem; color: var(--text-muted); font-style: italic;">Ninguna conexión histórica registrada</div>';
+          }}
 
           detailsDiv.innerHTML = `
             <div class="detail-item">
@@ -939,30 +1180,51 @@ def _write_historical_graph_html(graph_data: dict[str, Any], output_path: str | 
               <div class="detail-label">Ultimas apariciones</div>
               <div class="detail-value">${{lastSeen.join(', ') || '-'}}</div>
             </div>
+            <div class="detail-item">
+              <div class="detail-label">Top Conexiones Historicas</div>
+              <div style="margin-top: 4px;">${{topConnHtml}}</div>
+            </div>
+            <div class="detail-item">
+              <div class="detail-label">Aparece en Tesis</div>
+              <div class="detail-value" style="color: #c084fc; font-weight: bold;">${{setsText}}</div>
+            </div>
           `;
         }} else if (target.isEdge()) {{
-          const src = target.data('source');
-          const tgt = target.data('target');
+          const src = parseInt(target.data('source'));
+          const tgt = parseInt(target.data('target'));
           const cnt = target.data('count');
           const draws = target.data('draws') || [];
           const lastSeen = target.data('last_seen_draw');
 
+          // Find sets containing both numbers of this pair
+          const appearingSets = [];
+          candidates.forEach((cand, idx) => {{
+            if (cand.numbers.includes(src) && cand.numbers.includes(tgt)) {{
+              appearingSets.push(`Set ${{cand.letter || String.fromCharCode(65 + idx)}}`);
+            }}
+          }});
+          const setsText = appearingSets.length > 0 ? appearingSets.join(', ') : 'Ninguno';
+
           detailsDiv.innerHTML = `
             <div class="detail-item">
               <div class="detail-label">Par</div>
-              <div class="detail-value" style="font-weight: bold;">${{src}} &harr; ${{tgt}}</div>
+              <div class="detail-value" style="font-weight: bold; font-size: 1.1rem; color: var(--accent2);">${{src}} &harr; ${{tgt}}</div>
             </div>
             <div class="detail-item">
               <div class="detail-label">Coapariciones historicas</div>
-              <div class="detail-value" style="color: var(--accent);">${{cnt}} veces</div>
+              <div class="detail-value" style="color: var(--accent); font-weight: bold;">${{cnt}} veces</div>
             </div>
             <div class="detail-item">
               <div class="detail-label">Ultimo sorteo con el par</div>
               <div class="detail-value">${{lastSeen}}</div>
             </div>
             <div class="detail-item">
-              <div class="detail-label">Sorteos donde aparecio el par</div>
-              <div class="detail-value" style="font-size: 0.85rem;">${{draws.join(', ')}}</div>
+              <div class="detail-label">Sorteos donde apareció el par</div>
+              <div class="detail-value" style="font-size: 0.85rem; max-height: 80px; overflow-y: auto; line-height: 1.4;">${{draws.join(', ')}}</div>
+            </div>
+            <div class="detail-item">
+              <div class="detail-label">Aparece en Tesis</div>
+              <div class="detail-value" style="color: #c084fc; font-weight: bold;">${{setsText}}</div>
             </div>
           `;
         }}

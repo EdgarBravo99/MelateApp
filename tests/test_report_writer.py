@@ -154,6 +154,22 @@ def test_historical_graph_filters_by_game():
 def test_write_historical_graph_html(tmp_path):
     history = _make_history(30)
     graph = build_historical_relation_graph(history, window=30, game="revancha")
+    
+    # Attach candidates to test JSON embedding
+    graph["candidates"] = [
+        {
+            "numbers": [1, 2, 3, 4, 5, 6],
+            "classification": "Balance por bloques",
+            "reason_bullets": ["test"],
+            "pair_edges": [{"pair": "1—2", "count": 2, "draws": [1, 2]}],
+            "graph_support_score": 2,
+            "relation_count": 1,
+            "strongest_pairs": ["1—2"],
+            "evidence_draws": [2, 1],
+            "relation_window": 30,
+        }
+    ]
+
     html_path = tmp_path / "historical_graph.html"
     write_graph_html_report(graph, html_path)
     content = html_path.read_text(encoding="utf-8")
@@ -161,5 +177,13 @@ def test_write_historical_graph_html(tmp_path):
     assert "ultimos 30 sorteos" in content
     assert "cytoscape" in content
     assert "fallback" in content.lower()
+    
+    # Assert new UX improvements exist in HTML
+    assert "min-cooccurrence" in content
+    assert "resaltar-set" in content
+    assert "hide-isolated" in content
+    assert "candidates = [" in content
+    
     validate_text(content)
+
 

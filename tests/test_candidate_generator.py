@@ -58,7 +58,7 @@ def test_generate_candidates_honors_rules(sample_history):
         assert len(cand["numbers"]) == 6
         assert len(set(cand["numbers"])) == 6
         assert all(1 <= n <= 56 for n in cand["numbers"])
-        assert cand["classification"] in ["Balance por bloques", "Relacion historica moderada", "Cadencia y Ciclos"]
+        assert cand["classification"] in ["Balance por bloques", "Relacion historica moderada", "Contraste / cobertura"]
         assert len(cand["reason_bullets"]) > 0
         # Graph support fields must always be present
         assert "pair_edges" in cand
@@ -133,4 +133,57 @@ def test_candidates_report_passes_guardrails(sample_history):
     candidates = generate_candidates(analysis, count=3, seed=4218)
     report = format_candidates_report(candidates)
     validate_text(report)  # Should not raise
+
+
+def test_format_report_separates_perfiles_and_ranks():
+    candidates = [
+        {
+            "numbers": [1, 2, 3, 4, 5, 6],
+            "classification": "Balance por bloques",
+            "reason_bullets": ["cubre 5 bloques"],
+            "pair_edges": [{"pair": "1—2", "count": 2, "draws": [1, 2]}],
+            "graph_support_score": 2,
+            "relation_count": 1,
+            "strongest_pairs": ["1—2"],
+            "evidence_draws": [2, 1],
+            "relation_window": 30,
+        },
+        {
+            "numbers": [10, 11, 12, 13, 14, 15],
+            "classification": "Relacion historica moderada",
+            "reason_bullets": ["conserva 15 coapariciones"],
+            "pair_edges": [{"pair": "10—11", "count": 15, "draws": [1]}],
+            "graph_support_score": 15,
+            "relation_count": 1,
+            "strongest_pairs": ["10—11"],
+            "evidence_draws": [1],
+            "relation_window": 30,
+        },
+        {
+            "numbers": [20, 21, 22, 23, 24, 25],
+            "classification": "Contraste / cobertura",
+            "reason_bullets": ["contraste total"],
+            "pair_edges": [],
+            "graph_support_score": 0,
+            "relation_count": 0,
+            "strongest_pairs": [],
+            "evidence_draws": [],
+            "relation_window": 30,
+        }
+    ]
+    report = format_candidates_report(candidates)
+    
+    # 1. Check ranking is present and correctly ordered by graph_support_score
+    assert "Sets con mayor soporte de grafo: Set A (soporte: 15), Set B (soporte: 2)" in report
+    
+    # 2. Check profile headings are separated
+    assert "Perfil Balance por bloques" in report
+    assert "Perfil Relación histórica moderada" in report
+    assert "Perfil Contraste / cobertura" in report
+    
+    # 3. Check correct letter assignments (since it ranks candidates by score descending)
+    assert "Set A — Relacion historica moderada" in report
+    assert "Set B — Balance por bloques" in report
+    assert "Set C — Contraste / cobertura" in report
+
 
