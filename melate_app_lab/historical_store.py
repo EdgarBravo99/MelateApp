@@ -67,7 +67,7 @@ def insert_draw_record(
     ensure_schema: bool = True,
 ) -> bool:
     if ensure_schema:
-        ensure_schema(connection)
+        globals()["ensure_schema"](connection)
     normalized = normalize_draw_record(record)
     cursor = connection.execute(
         """
