@@ -280,7 +280,13 @@ def launch_desktop() -> int:
         # Instead, just log to the console to ensure QBackingStore issues are avoided.
         finish_action(False)
 
-    def run_action(name: str, fn: Callable[[], object], threaded: bool = False) -> None:
+    def run_action(
+        name: str,
+        fn: Callable[[], object],
+        threaded: bool = False,
+        on_done: Callable[[Any], None] | None = None,
+        on_log_cb: Callable[[str], None] | None = None,
+    ) -> None:
         # Disable buttons to prevent double-clicks
         for btn in action_buttons:
             btn.setEnabled(False)
@@ -297,11 +303,25 @@ def launch_desktop() -> int:
         def _on_finished() -> None:
             finish_action(not action_state["error"])
 
+        def _on_log(msg: str) -> None:
+            log(msg)
+            if on_log_cb:
+                on_log_cb(msg)
+
+        def _on_result(res: Any) -> None:
+            if on_done:
+                try:
+                    on_done(res)
+                except Exception as e:
+                    _on_error(str(e))
+            else:
+                handle_payload(res)
+
         if threaded:
             qt_runner.run(
                 fn,
-                on_log=log,
-                on_result=handle_payload,
+                on_log=_on_log,
+                on_result=_on_result,
                 on_error=_on_error,
                 on_finished=_on_finished,
             )
@@ -309,11 +329,11 @@ def launch_desktop() -> int:
 
         # Use QTimer for sync calls to allow the progress bar to go into indeterminate mode visually
         def execute_sync():
-            worker_result = run_task_sync(fn, log=log)
+            worker_result = run_task_sync(fn, log=_on_log)
             if not worker_result.ok:
                 _on_error(worker_result.error or "Error")
             else:
-                handle_payload(worker_result.result)
+                _on_result(worker_result.result)
             _on_finished()
                 
         QTimer.singleShot(50, execute_sync)
@@ -936,6 +956,7 @@ def launch_desktop() -> int:
 
     def start_backtest():
         try:
+            backtest_output.clear()
             game = backtest_game_combo.currentText()
             limit = int(backtest_limit_combo.currentText())
             pool_size = int(backtest_pool_combo.currentText())
@@ -976,7 +997,13 @@ def launch_desktop() -> int:
                 backtest_output.setPlainText(summary_text)
                 log(f"Backtesting completado para los últimos {limit} sorteos.")
 
-            run_action("Ejecutar Backtest", run_b, True, on_b_done)
+            run_action(
+                "Ejecutar Backtest",
+                run_b,
+                threaded=True,
+                on_done=on_b_done,
+                on_log_cb=backtest_output.appendPlainText,
+            )
         except Exception as e:
             log(f"Error: {e}")
 
