@@ -27,9 +27,12 @@ def _connect(db_path: str | Path | None = None) -> sqlite3.Connection:
     return sqlite3.connect(":memory:" if db_path is None else str(db_path))
 
 
-def ensure_schema(connection: sqlite3.Connection) -> None:
+def ensure_historical_schema(connection: sqlite3.Connection) -> None:
     connection.execute(SCHEMA)
     connection.commit()
+
+
+ensure_schema = ensure_historical_schema
 
 
 def _row_to_record(row: sqlite3.Row | tuple[Any, ...]) -> dict[str, Any]:
@@ -51,7 +54,7 @@ def import_draws_to_memory(
     db_path: str | Path | None = None,
 ) -> sqlite3.Connection:
     connection = _connect(db_path)
-    ensure_schema(connection)
+    ensure_historical_schema(connection)
 
     for record in records:
         insert_draw_record(connection, record, commit=False, ensure_schema=False)
@@ -67,7 +70,7 @@ def insert_draw_record(
     ensure_schema: bool = True,
 ) -> bool:
     if ensure_schema:
-        globals()["ensure_schema"](connection)
+        ensure_historical_schema(connection)
     normalized = normalize_draw_record(record)
     cursor = connection.execute(
         """
@@ -98,70 +101,74 @@ def load_draw_history(
     limit: int | None = None,
     game: str | None = None,
 ) -> list[dict[str, Any]]:
-    if isinstance(source, sqlite3.Connection):
-        connection = source
-    else:
-        connection = _connect(source)
+    is_local = not isinstance(source, sqlite3.Connection)
+    connection = _connect(source) if is_local else source
 
-    ensure_schema(connection)
-    limit_clause = ""
-    params: tuple[Any, ...] = ()
-    order_by = "draw_date, game, draw"
-    if limit is not None:
-        limit_clause = "LIMIT ?"
-        params = (limit,)
-        order_by = "draw_date DESC, game, draw DESC"
+    try:
+        ensure_historical_schema(connection)
+        limit_clause = ""
+        params: tuple[Any, ...] = ()
+        order_by = "draw_date, game, draw"
+        if limit is not None:
+            limit_clause = "LIMIT ?"
+            params = (limit,)
+            order_by = "draw_date DESC, game, draw DESC"
 
-    if game is None:
-        cursor = connection.execute(
-            f"""
-            SELECT game, draw, draw_date, numbers_json, sum, sum_band,
-                   block_signature, block_presence_signature
-            FROM historical_draws
-            ORDER BY {order_by}
-            {limit_clause}
-            """,
-            params,
-        )
-    else:
-        params = (game.casefold(), *params)
-        cursor = connection.execute(
-            f"""
-            SELECT game, draw, draw_date, numbers_json, sum, sum_band,
-                   block_signature, block_presence_signature
-            FROM historical_draws
-            WHERE game = ?
-            ORDER BY {order_by}
-            {limit_clause}
-            """,
-            params,
-        )
+        if game is None:
+            cursor = connection.execute(
+                f"""
+                SELECT game, draw, draw_date, numbers_json, sum, sum_band,
+                       block_signature, block_presence_signature
+                FROM historical_draws
+                ORDER BY {order_by}
+                {limit_clause}
+                """,
+                params,
+            )
+        else:
+            params = (game.casefold(), *params)
+            cursor = connection.execute(
+                f"""
+                SELECT game, draw, draw_date, numbers_json, sum, sum_band,
+                       block_signature, block_presence_signature
+                FROM historical_draws
+                WHERE game = ?
+                ORDER BY {order_by}
+                {limit_clause}
+                """,
+                params,
+            )
 
-    records = [_row_to_record(row) for row in cursor.fetchall()]
-    if limit is not None:
-        records.reverse()
-    return records
+        records = [_row_to_record(row) for row in cursor.fetchall()]
+        if limit is not None:
+            records.reverse()
+        return records
+    finally:
+        if is_local:
+            connection.close()
 
 
 def get_latest_draw(
     source: sqlite3.Connection | str | Path,
     game: str | None = None,
 ) -> int | None:
-    if isinstance(source, sqlite3.Connection):
-        connection = source
-    else:
-        connection = _connect(source)
+    is_local = not isinstance(source, sqlite3.Connection)
+    connection = _connect(source) if is_local else source
 
-    ensure_schema(connection)
-    if game is None:
-        cursor = connection.execute("SELECT MAX(draw) FROM historical_draws")
-    else:
-        cursor = connection.execute(
-            "SELECT MAX(draw) FROM historical_draws WHERE game = ?",
-            (game.casefold(),),
-        )
-    latest = cursor.fetchone()[0]
-    return None if latest is None else int(latest)
+    try:
+        ensure_historical_schema(connection)
+        if game is None:
+            cursor = connection.execute("SELECT MAX(draw) FROM historical_draws")
+        else:
+            cursor = connection.execute(
+                "SELECT MAX(draw) FROM historical_draws WHERE game = ?",
+                (game.casefold(),),
+            )
+        latest = cursor.fetchone()[0]
+        return None if latest is None else int(latest)
+    finally:
+        if is_local:
+            connection.close()
 
 
 def suggest_next_draw(

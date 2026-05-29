@@ -194,8 +194,11 @@ def run_unified_workflow(
             "numbers": result_numbers,
         })
 
-        with _connect(db_path) as conn:
+        conn = _connect(db_path)
+        try:
             insert_draw_record(conn, result_record, commit=True, ensure_schema=True)
+        finally:
+            conn.close()
 
         if log_fn:
             log_fn(f"Resultado oficial registrado en historical_store: {result_numbers}")

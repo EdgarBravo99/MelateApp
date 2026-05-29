@@ -211,3 +211,20 @@ def test_save_thesis_portfolio_with_score(tmp_path):
     assert cands[1]["rank_score"] is None
 
 
+def test_thesis_memory_closes_all_connections(tmp_path):
+    from unittest.mock import patch, MagicMock
+    import melate_app_lab.thesis_memory as tm
+    db_path = tmp_path / "data" / "memory.sqlite"
+    
+    mock_conn = MagicMock()
+    mock_conn.__enter__.return_value = mock_conn
+    mock_conn.execute.return_value.fetchall.return_value = []
+    mock_conn.cursor.return_value.lastrowid = 1
+    
+    with patch("melate_app_lab.thesis_memory._connect", return_value=mock_conn) as mock_connect:
+        tm.remember_review_thesis(db_path, 4218, "Tesis de revision: valida.")
+        mock_connect.assert_called()
+        mock_conn.close.assert_called()
+
+
+

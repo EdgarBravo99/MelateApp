@@ -18,6 +18,40 @@ def test_evaluate_portfolio_coverage():
     assert metrics["unique_block_signatures"] == 3
     assert metrics["average_internal_overlap"] == 1.0
 
+
+def test_evaluate_portfolio_coverage_empty():
+    assert evaluate_portfolio_coverage([]) == {}
+
+
+def test_run_unified_workflow_closes_connection(tmp_path):
+    from unittest.mock import patch, MagicMock
+    db_path = tmp_path / "data" / "memory.sqlite"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Let's import mock history to avoid empty history check
+    history_records = [
+        {"game": "revancha", "draw": 4210, "date": "2026-05-01", "numbers": [1, 2, 3, 4, 5, 6]}
+    ]
+    import_draws_to_memory(history_records, db_path=db_path)
+    
+    mock_conn = MagicMock()
+    mock_conn.__enter__.return_value = mock_conn
+    
+    with patch("melate_app_lab.workflow_loop._connect", return_value=mock_conn) as mock_connect:
+        run_unified_workflow(
+            db_path=db_path,
+            draw=4211,
+            game="revancha",
+            pool_size=10,
+            seed=123,
+            result_numbers=[1, 2, 3, 4, 5, 6]
+        )
+        
+        mock_connect.assert_called()
+        mock_conn.close.assert_called()
+
+
+
 def test_run_unified_workflow(tmp_path):
     # Setup test DB path in a valid 'data' folder to satisfy thesis_memory checks
     db_path = tmp_path / "data" / "memory.sqlite"
