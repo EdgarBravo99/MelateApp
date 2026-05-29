@@ -77,6 +77,7 @@ def _init_db(db_path: str | Path) -> None:
                 sum_band text not null,
                 block_signature text not null,
                 graph_support_score integer not null,
+                rank_score real,
                 pair_edges text,
                 evidence_draws text,
                 notes text,
@@ -87,6 +88,11 @@ def _init_db(db_path: str | Path) -> None:
             )
             """
         )
+        try:
+            conn.execute("ALTER TABLE thesis_candidates ADD COLUMN rank_score REAL")
+        except sqlite3.OperationalError:
+            pass  # Already exists
+
 
 
 def _validate_memory_text(draw: int, text: str, field: str) -> None:
@@ -238,9 +244,9 @@ def save_thesis_portfolio(
                 """
                 insert into thesis_candidates (
                     portfolio_id, numbers, classification, state, sum, sum_band,
-                    block_signature, graph_support_score, pair_edges, evidence_draws,
+                    block_signature, graph_support_score, rank_score, pair_edges, evidence_draws,
                     notes, result_numbers, hits_count
-                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     portfolio_id,
@@ -251,6 +257,7 @@ def save_thesis_portfolio(
                     cand["sum_band"],
                     cand["block_signature"],
                     cand["graph_support_score"],
+                    cand.get("rank_score"),
                     pair_edges_str,
                     evidence_draws_str,
                     cand.get("notes", ""),
@@ -292,7 +299,7 @@ def load_thesis_candidates(db_path: str | Path, portfolio_id: int) -> list[dict[
         rows = conn.execute(
             """
             select id, portfolio_id, numbers, classification, state, sum, sum_band,
-                   block_signature, graph_support_score, pair_edges, evidence_draws,
+                   block_signature, graph_support_score, rank_score, pair_edges, evidence_draws,
                    notes, result_numbers, hits_count, created_at
             from thesis_candidates
             where portfolio_id = ?
@@ -311,12 +318,13 @@ def load_thesis_candidates(db_path: str | Path, portfolio_id: int) -> list[dict[
             "sum_band": row[6],
             "block_signature": row[7],
             "graph_support_score": row[8],
-            "pair_edges": json.loads(row[9]) if row[9] else [],
-            "evidence_draws": json.loads(row[10]) if row[10] else [],
-            "notes": row[11],
-            "result_numbers": json.loads(row[12]) if row[12] else None,
-            "hits_count": row[13],
-            "created_at": row[14],
+            "rank_score": row[9],
+            "pair_edges": json.loads(row[10]) if row[10] else [],
+            "evidence_draws": json.loads(row[11]) if row[11] else [],
+            "notes": row[12],
+            "result_numbers": json.loads(row[13]) if row[13] else None,
+            "hits_count": row[14],
+            "created_at": row[15],
         }
         for row in rows
     ]
