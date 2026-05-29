@@ -35,7 +35,15 @@ def run_task_sync(
 
     try:
         emit("Ejecutando revision...")
-        result = task(*args, **kwargs)
+        import inspect
+        sig = inspect.signature(task)
+        custom_kwargs = dict(kwargs)
+        if "log_fn" in sig.parameters:
+            custom_kwargs["log_fn"] = emit
+        elif "log" in sig.parameters:
+            custom_kwargs["log"] = emit
+
+        result = task(*args, **custom_kwargs)
         emit("Listo.")
         return WorkerResult(ok=True, result=result, logs=logs)
     except Exception as exc:  # pragma: no cover - exercised by callers as text path
@@ -82,7 +90,15 @@ class QtTaskRunner:
                 import traceback
                 try:
                     self.log.emit("Ejecutando revision...")
-                    payload = task(*args, **kwargs)
+                    import inspect
+                    sig = inspect.signature(task)
+                    custom_kwargs = dict(kwargs)
+                    if "log_fn" in sig.parameters:
+                        custom_kwargs["log_fn"] = self.log.emit
+                    elif "log" in sig.parameters:
+                        custom_kwargs["log"] = self.log.emit
+
+                    payload = task(*args, **custom_kwargs)
                     self.result.emit(payload)
                     self.log.emit("Listo.")
                 except Exception as exc:  # pragma: no cover - Qt path

@@ -299,6 +299,8 @@ def launch_desktop() -> int:
         def _on_error(msg: str) -> None:
             action_state["error"] = True
             handle_error(msg)
+            if on_log_cb:
+                on_log_cb(f"Error: {msg}")
             
         def _on_finished() -> None:
             finish_action(not action_state["error"])
