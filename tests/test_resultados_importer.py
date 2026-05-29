@@ -234,3 +234,59 @@ def test_bulk_import_many_rows(tmp_path):
     assert result["duplicates_skipped"] == 0
     assert result["invalid_rows"] == 0
     assert result["history_count"] == 600
+
+
+def test_ensure_historical_schema_exists():
+    from melate_app_lab import historical_store
+    assert hasattr(historical_store, "ensure_historical_schema")
+    assert historical_store.ensure_schema == historical_store.ensure_historical_schema
+
+
+def test_load_draw_history_closes_local_connection():
+    from unittest.mock import patch, MagicMock
+    from melate_app_lab import historical_store
+    mock_conn = MagicMock()
+    with patch("melate_app_lab.historical_store._connect", return_value=mock_conn) as mock_connect:
+        historical_store.load_draw_history("dummy_path")
+        mock_connect.assert_called_once_with("dummy_path")
+        mock_conn.close.assert_called_once()
+
+
+def test_get_latest_draw_closes_local_connection():
+    from unittest.mock import patch, MagicMock
+    from melate_app_lab import historical_store
+    mock_conn = MagicMock()
+    mock_conn.execute.return_value.fetchone.return_value = [None]
+    with patch("melate_app_lab.historical_store._connect", return_value=mock_conn) as mock_connect:
+        historical_store.get_latest_draw("dummy_path")
+        mock_connect.assert_called_once_with("dummy_path")
+        mock_conn.close.assert_called_once()
+
+
+def test_load_draw_history_does_not_close_passed_connection():
+    from melate_app_lab import historical_store
+    import sqlite3
+    conn = sqlite3.connect(":memory:")
+    historical_store.ensure_schema(conn)
+    try:
+        historical_store.load_draw_history(conn)
+        # Verify connection is still open
+        conn.execute("SELECT 1")
+    finally:
+        conn.close()
+
+
+def test_get_latest_draw_does_not_close_passed_connection():
+    from melate_app_lab import historical_store
+    import sqlite3
+    conn = sqlite3.connect(":memory:")
+    historical_store.ensure_schema(conn)
+    try:
+        historical_store.get_latest_draw(conn)
+        # Verify connection is still open
+        conn.execute("SELECT 1")
+    finally:
+        conn.close()
+
+
+
