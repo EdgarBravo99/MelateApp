@@ -70,7 +70,7 @@ class QtTaskRunner:
         on_finished: Callable[[], None] | None = None,
         **kwargs: Any,
     ) -> Any:
-        from PySide6.QtCore import QObject, QThread, Signal
+        from PySide6.QtCore import QObject, QThread, Signal, Slot
 
         class TaskObject(QObject):
             log = Signal(str)
@@ -92,24 +92,67 @@ class QtTaskRunner:
                 finally:
                     self.finished.emit()
 
+        class SignalReceiver(QObject):
+            def __init__(
+                self,
+                log_fn: Callable[[str], None] | None,
+                result_fn: Callable[[Any], None] | None,
+                error_fn: Callable[[str], None] | None,
+                finished_fn: Callable[[], None] | None,
+            ) -> None:
+                super().__init__()
+                self.log_fn = log_fn
+                self.result_fn = result_fn
+                self.error_fn = error_fn
+                self.finished_fn = finished_fn
+
+            @Slot(str)
+            def handle_log(self, msg: str) -> None:
+                if self.log_fn:
+                    self.log_fn(msg)
+
+            @Slot(object)
+            def handle_result(self, payload: Any) -> None:
+                if self.result_fn:
+                    self.result_fn(payload)
+
+            @Slot(str)
+            def handle_error(self, msg: str) -> None:
+                if self.error_fn:
+                    self.error_fn(msg)
+
+            @Slot()
+            def handle_finished(self) -> None:
+                if self.finished_fn:
+                    self.finished_fn()
+
         thread = QThread()
         worker = TaskObject()
+        receiver = SignalReceiver(on_log, on_result, on_error, on_finished)
+
         worker.moveToThread(thread)
-        if on_log:
-            worker.log.connect(on_log)
-        if on_result:
-            worker.result.connect(on_result)
-        if on_error:
-            worker.error.connect(on_error)
-        if on_finished:
-            worker.finished.connect(on_finished)
+
+        worker.log.connect(receiver.handle_log)
+        worker.result.connect(receiver.handle_result)
+        worker.error.connect(receiver.handle_error)
+        worker.finished.connect(receiver.handle_finished)
         worker.finished.connect(thread.quit)
-        worker.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(lambda: self._threads.remove(thread) if thread in self._threads else None)
-        worker.finished.connect(lambda: self._workers.remove(worker) if worker in self._workers else None)
+
+        def cleanup() -> None:
+            worker.deleteLater()
+            receiver.deleteLater()
+            thread.deleteLater()
+            if worker in self._workers:
+                self._workers.remove(worker)
+            if receiver in self._workers:
+                self._workers.remove(receiver)
+            if thread in self._threads:
+                self._threads.remove(thread)
+
+        thread.finished.connect(cleanup)
         thread.started.connect(worker.execute)
         self._threads.append(thread)
         self._workers.append(worker)
+        self._workers.append(receiver)
         thread.start()
         return thread

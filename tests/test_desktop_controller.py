@@ -53,7 +53,7 @@ def test_parse_played_tickets_flexible_reports_leftover_numbers():
     try:
         parse_played_tickets_flexible("1 2 3 4 5 6 7")
     except ValueError as exc:
-        assert "sobran" in str(exc).casefold()
+        assert "separados por" in str(exc).casefold()
     else:
         raise AssertionError("Expected ValueError")
 
@@ -62,7 +62,7 @@ def test_parse_played_tickets_flexible_reports_duplicates():
     try:
         parse_played_tickets_flexible("1 2 3 4 5 5")
     except ValueError as exc:
-        assert "duplicados" in str(exc).casefold()
+        assert "separados por" in str(exc).casefold()
     else:
         raise AssertionError("Expected ValueError")
 
@@ -71,7 +71,16 @@ def test_parse_played_tickets_flexible_reports_out_of_range():
     try:
         parse_played_tickets_flexible("1 2 3 4 5 57")
     except ValueError as exc:
-        assert "fuera de rango" in str(exc).casefold()
+        assert "separados por" in str(exc).casefold()
+    else:
+        raise AssertionError("Expected ValueError")
+
+
+def test_parse_played_tickets_flexible_rejects_glued_numbers():
+    try:
+        parse_played_tickets_flexible("71529414248")
+    except ValueError as exc:
+        assert "separados por" in str(exc).casefold()
     else:
         raise AssertionError("Expected ValueError")
 

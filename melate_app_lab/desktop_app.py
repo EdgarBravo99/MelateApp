@@ -448,7 +448,7 @@ def launch_desktop() -> int:
     def start_postmortem():
         try:
             draw, result_text, played_text = validate_inputs()
-            run_action("Postmortem", lambda: controller.run_postmortem(draw, result_text, played_text), False)
+            run_action("Postmortem", lambda: controller.run_postmortem(draw, result_text, played_text), True)
         except Exception as e:
             log(f"Error: {e}")
 
@@ -469,14 +469,14 @@ def launch_desktop() -> int:
     def start_remember():
         try:
             draw, result_text, played_text = validate_inputs()
-            run_action("Remember", lambda: controller.run_remember(draw, result_text, played_text), False)
+            run_action("Remember", lambda: controller.run_remember(draw, result_text, played_text), True)
         except Exception as e:
             log(f"Error: {e}")
 
     def start_generate_report():
         try:
             draw, result_text, played_text = validate_inputs()
-            run_action("Generate Report", lambda: controller.run_report(draw, result_text, played_text), False)
+            run_action("Generate Report", lambda: controller.run_report(draw, result_text, played_text), True)
         except Exception as e:
             log(f"Error: {e}")
 
