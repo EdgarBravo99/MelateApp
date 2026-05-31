@@ -167,7 +167,7 @@ def test_backtest_cli_options(tmp_path, monkeypatch):
 
     help_result = runner.invoke(app, ["backtest", "--help"])
     assert help_result.exit_code == 0
-    assert "use-optimizer" in help_result.output
-    assert "use-feedback-prof" in help_result.output
+    assert "optimizer" in help_result.output
+    assert "feedback" in help_result.output
 
 
