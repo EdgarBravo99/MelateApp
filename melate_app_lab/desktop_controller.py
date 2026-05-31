@@ -524,5 +524,64 @@ def is_ml_supported() -> bool:
     return is_ml_available()
 
 
+def run_evaluate_portfolio(
+    db_path: str | Path,
+    portfolio_id: int,
+    result_text: str,
+    game: str = "revancha",
+) -> dict[str, Any]:
+    from .portfolio_evaluator import evaluate_existing_portfolio
+    from .number_utils import parse_numbers
+    result_numbers = parse_numbers(result_text)
+    _ensure_db_parent(db_path)
+    return validate_output_json(
+        evaluate_existing_portfolio(
+            db_path=db_path,
+            portfolio_id=portfolio_id,
+            result_numbers=result_numbers,
+            game=game,
+            persist=True,
+        )
+    )
+
+
+def run_learn_feedback(
+    db_path: str | Path,
+    game: str = "revancha",
+    seed: int = 42,
+) -> dict[str, Any]:
+    from .feedback_learner import learn_from_reviewed_portfolios
+    _ensure_db_parent(db_path)
+    return validate_output_json(
+        learn_from_reviewed_portfolios(
+            db_path=db_path,
+            game=game,
+            seed=seed,
+        )
+    )
+
+
+def load_active_profile_info(
+    db_path: str | Path,
+    game: str = "revancha",
+) -> dict[str, Any] | None:
+    from .thesis_memory import get_active_feedback_profile
+    _ensure_db_parent(db_path)
+    profile = get_active_feedback_profile(db_path, game)
+    if not profile:
+        return None
+    return validate_output_json({
+        "id": profile["id"],
+        "game": profile["game"],
+        "source_from_draw": profile["source_from_draw"],
+        "source_to_draw": profile["source_to_draw"],
+        "algorithm": profile["algorithm"],
+        "metrics": profile["metrics"],
+        "active": profile["active"],
+        "created_at": profile["created_at"],
+    })
+
+
+
 
 
