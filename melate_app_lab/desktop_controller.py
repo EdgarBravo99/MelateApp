@@ -842,6 +842,12 @@ def generate_automatic_review(
                 "numbers": c["numbers"],
                 "classification": strat,
                 "graph_support_score": c.get("graph_support_score", 0.0),
+                "sum": c.get("sum", sum(c["numbers"])),
+                "sum_band": c.get("sum_band", "mid_band"),
+                "block_signature": c.get("block_signature", ""),
+                "rank_score": c.get("rank_score"),
+                "pair_edges": c.get("pair_edges", []),
+                "evidence_draws": c.get("evidence_draws", []),
                 "notes": json.dumps(c_notes, ensure_ascii=False),
             })
 

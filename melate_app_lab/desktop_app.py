@@ -230,9 +230,6 @@ def launch_desktop() -> int:
         if not isinstance(payload, dict):
             return
 
-        if payload.get("report_text") and "candidates" in payload:
-            candidates_output.setPlainText(payload["report_text"])
-
         if payload.get("html_path"):
             last_html_report["path"] = str(payload["html_path"])
             refresh_reports_table()
@@ -242,30 +239,6 @@ def launch_desktop() -> int:
             # Auto-update the next suggested draw if we are on the analysis page
             if payload.get("suggested_next_draw"):
                 draw_input.setText(str(payload["suggested_next_draw"]))
-
-        components = payload.get("components")
-        component_payload = components if isinstance(components, dict) else {}
-        trace = component_payload.get("trace") if component_payload else payload
-        postmortem = component_payload.get("postmortem") if component_payload else payload
-        stress = component_payload.get("stress_review") if component_payload else payload
-        if isinstance(postmortem, dict):
-            metric_labels["Capturados"].setText(f"Capturados\n{postmortem.get('captured_numbers', '-')}")
-            metric_labels["No capturados"].setText(f"No capturados\n{postmortem.get('missed_numbers', '-')}")
-        if isinstance(trace, dict):
-            metric_labels["Suma"].setText(f"Suma\n{trace.get('sum', '-')}")
-            metric_labels["Banda"].setText(f"Banda\n{trace.get('sum_band', '-')}")
-            metric_labels["Firma"].setText(f"Firma\n{trace.get('block_signature', '-')}")
-        if isinstance(stress, dict):
-            metric_labels["Anclas"].setText(
-                f"Anclas\n{stress.get('anchor_concentration', {}).get('repeated_numbers', '-')}"
-            )
-            metric_labels["Alertas"].setText(f"Alertas\n{len(stress.get('review_alerts_es', []))}")
-        if payload.get("llm_provider"):
-            prov = payload["llm_provider"]
-            if prov in ("disabled", "local_stub"):
-                metric_labels["Analista"].setText(f"Analista\nLocal")
-            else:
-                metric_labels["Analista"].setText(f"Analista\n{prov}")
 
     def finish_action(ok: bool = True) -> None:
         progress.setRange(0, 1)
