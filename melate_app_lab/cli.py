@@ -375,3 +375,30 @@ def learn_feedback_cmd(
     )
     _json(res)
 
+
+@app.command("bootstrap-feedback")
+def bootstrap_feedback_cmd(
+    game: Annotated[str, typer.Option("--game")] = "revancha",
+    from_draw: Annotated[int | None, typer.Option("--from-draw")] = None,
+    to_draw: Annotated[int | None, typer.Option("--to-draw")] = None,
+    limit: Annotated[int, typer.Option("--limit")] = 20,
+    pool_size: Annotated[int, typer.Option("--pool-size")] = 1000,
+    top_k: Annotated[int, typer.Option("--top-k")] = 10,
+    seed: Annotated[int, typer.Option("--seed")] = 42,
+    mark_all_as_played: Annotated[bool, typer.Option("--mark-all-as-played/--no-mark-all-as-played")] = True,
+) -> None:
+    """Bootstrap de carteras revisadas históricas retrospectivas."""
+    from .feedback_bootstrap import bootstrap_reviewed_portfolios
+    res = bootstrap_reviewed_portfolios(
+        db_path=DEFAULT_DB_PATH,
+        game=game,
+        from_draw=from_draw,
+        to_draw=to_draw,
+        limit=limit,
+        pool_size=pool_size,
+        top_k=top_k,
+        seed=seed,
+        mark_all_as_played=mark_all_as_played,
+    )
+    _json(res)
+
