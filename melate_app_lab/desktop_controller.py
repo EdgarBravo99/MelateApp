@@ -16,6 +16,7 @@ from .montecarlo_stress import stress_review
 from .number_utils import parse_numbers
 from .postmortem import postmortem_review
 from .report_writer import write_csv_summary, write_html_report, write_json_report
+from . import manual_verifier
 
 
 def _ensure_db_parent(db_path: str | Path) -> None:
