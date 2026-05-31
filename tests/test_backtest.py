@@ -209,7 +209,8 @@ def test_run_backtest(sample_history):
 
 
 def test_run_backtest_lab_controller(tmp_path, sample_history):
-    db_file = tmp_path / "test_backtest_mem.sqlite"
+    db_file = tmp_path / "data" / "test_backtest_mem.sqlite"
+    db_file.parent.mkdir(parents=True, exist_ok=True)
     
     # Setup SQLite memory and load history
     from melate_app_lab.historical_store import import_draws_to_memory

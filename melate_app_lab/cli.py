@@ -276,6 +276,7 @@ def backtest_cmd(
     use_structural_diversification: Annotated[bool, typer.Option("--use-structural-diversification/--no-use-structural-diversification")] = False,
     structural_diversity_weight: Annotated[float, typer.Option("--structural-diversity-weight")] = 1.0,
     use_optimizer: Annotated[bool, typer.Option("--use-optimizer/--no-use-optimizer")] = False,
+    use_feedback_profile: Annotated[bool, typer.Option("--use-feedback-profile/--no-use-feedback-profile")] = False,
 ) -> None:
     from .desktop_controller import run_backtest_lab, open_report
 
@@ -290,6 +291,7 @@ def backtest_cmd(
         use_structural_diversification=use_structural_diversification,
         structural_diversity_weight=structural_diversity_weight,
         use_optimizer=use_optimizer,
+        use_feedback_profile=use_feedback_profile,
     )
     _json(res)
     open_report(res["html_path"])

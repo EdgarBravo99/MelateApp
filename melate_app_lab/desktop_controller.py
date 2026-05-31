@@ -536,10 +536,11 @@ def run_backtest_lab(
     top_k: int = 10,
     seed: int = 42,
     use_ml: bool = False,
+    use_optimizer: bool = False,
+    use_feedback_profile: bool = False,
     log_fn: Callable[[str], None] | None = None,
     use_structural_diversification: bool = False,
     structural_diversity_weight: float = 1.0,
-    use_optimizer: bool = False,
 ) -> dict[str, Any]:
     from .historical_store import load_draw_history
     from .backtest_lab import run_backtest
@@ -568,6 +569,8 @@ def run_backtest_lab(
         game=game,
         use_ml=use_ml,
         use_optimizer=use_optimizer,
+        use_feedback_profile=use_feedback_profile,
+        db_path=db_path,
         log_fn=log_fn,
         use_structural_diversification=use_structural_diversification,
         structural_diversity_weight=structural_diversity_weight,
