@@ -95,6 +95,8 @@ def run_unified_workflow(
     use_optimizer: bool = True,
     use_feedback_profile: bool = True,
     log_fn: Callable[[str], None] | None = None,
+    use_structural_diversification: bool = False,
+    structural_diversity_weight: float = 1.0,
 ) -> dict[str, Any]:
     """Execute the interactive workflow loop of Thesis -> Portfolio -> Play -> Evaluate."""
     history = load_draw_history(db_path, game=game)
@@ -127,6 +129,11 @@ def run_unified_workflow(
     
     ranked = rank_candidates(cand_features, common_sigs, common_bands, weights=weights)
 
+    # Compute structural signals if active
+    if use_structural_diversification:
+        from .structural_signal_engine import compute_structural_signals_batch
+        ranked = compute_structural_signals_batch(ranked, prior_history, window=30, gap_window=50, max_lag=5)
+
     # 2. Build candidates payload (taking top 10 ranked)
     candidates_payload = []
     # Build a lookup for pair co-occurrence details from graph_data for candidate richness
@@ -143,7 +150,12 @@ def run_unified_workflow(
 
     if use_optimizer:
         from .portfolio_optimizer import optimize_portfolio
-        selected_portfolio = optimize_portfolio(ranked, top_k)
+        selected_portfolio = optimize_portfolio(
+            ranked,
+            top_k,
+            use_structural_diversification=use_structural_diversification,
+            structural_diversity_weight=structural_diversity_weight,
+        )
     else:
         selected_portfolio = ranked[:top_k]
 
@@ -168,6 +180,20 @@ def run_unified_workflow(
 
         evidence_draws = sorted(list(set(evidence_draws)), reverse=True)[:5]
 
+        if use_structural_diversification:
+            notes_field = json.dumps({
+                "rank_score": c.get("rank_score", 0.0),
+                "structural_signal_score": c.get("structural_signal_score", 0.0),
+                "pair_lag_score": c.get("pair_lag_score", 0.0),
+                "block_activity_score": c.get("block_activity_score", 0.0),
+                "gap_echo_score": c.get("gap_echo_score", 0.0),
+                "gap_family": c.get("gap_family", ""),
+                "selection_reason": c.get("selection_reason", ""),
+                "structural_notes": c.get("structural_notes", []),
+            })
+        else:
+            notes_field = f"Score: {c.get('rank_score', 0.0)}"
+
         candidates_payload.append({
             "numbers": nums,
             "classification": strat,
@@ -179,7 +205,7 @@ def run_unified_workflow(
             "rank_score": c.get("rank_score", 0.0),
             "pair_edges": pair_edges,
             "evidence_draws": evidence_draws,
-            "notes": f"Score: {c.get('rank_score', 0.0)}",
+            "notes": notes_field,
         })
 
     # Calculate coverage metrics of the portfolio

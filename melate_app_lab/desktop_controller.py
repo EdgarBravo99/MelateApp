@@ -341,6 +341,8 @@ def run_revision_completa(
     game: str = "revancha",
     notes: str | None = None,
     draw: int | None = None,
+    use_structural_diversification: bool = False,
+    structural_diversity_weight: float = 1.0,
 ) -> dict[str, Any]:
     from .historical_store import load_draw_history, suggest_next_draw
     from .candidate_generator import analyze_time_window, generate_candidates
@@ -357,11 +359,64 @@ def run_revision_completa(
     next_draw = draw if draw is not None else suggest_next_draw(db_path)
     analysis = analyze_time_window(history, window=30)
     graph_data = build_historical_relation_graph(history, window=30, game=game)
-    candidates = generate_candidates(analysis, count=count, graph_data=graph_data)
 
-    # Assign letter labels
-    for idx, cand in enumerate(candidates):
-        cand["letter"] = chr(ord('A') + idx)
+    if not use_structural_diversification:
+        candidates = generate_candidates(analysis, count=count, graph_data=graph_data)
+        # Assign letter labels
+        for idx, cand in enumerate(candidates):
+            cand["letter"] = chr(ord('A') + idx)
+    else:
+        # Generar pool mayor y aplicar diversificación
+        pool_size = max(100, count * 10)
+        pool = generate_candidates(analysis, count=pool_size, seed=4218, graph_data=graph_data)
+        
+        # Calcular campos necesarios para el ranker actual
+        for cand in pool:
+            nums = cand["numbers"]
+            cand["even_count"] = sum(1 for n in nums if n % 2 == 0)
+            cand["odd_count"] = 6 - cand["even_count"]
+            cand["diversity_score"] = cand["block_presence_signature"].count("1")
+            cand["pair_edges_count"] = len(cand.get("pair_edges", []))
+            cand["historical_exact_match"] = False
+            
+        from .candidate_ranker import rank_candidates
+        common_sigs = analysis.get("common_signatures", [])
+        common_bands = analysis.get("common_bands", [])
+        ranked = rank_candidates(pool, common_sigs, common_bands)
+        
+        # Calcular senales estructurales
+        prior_history = [d for d in history if d["draw"] < next_draw]
+        if not prior_history:
+            prior_history = history
+        from .structural_signal_engine import compute_structural_signals_batch
+        ranked = compute_structural_signals_batch(ranked, prior_history, window=30, gap_window=50, max_lag=5)
+        
+        # Optimizar cartera usando diversificación estructural
+        from .portfolio_optimizer import optimize_portfolio
+        candidates = optimize_portfolio(
+            ranked,
+            count,
+            use_structural_diversification=True,
+            structural_diversity_weight=structural_diversity_weight
+        )
+        
+        # Formatear el campo notes para guardar en la base de datos
+        import json
+        for c in candidates:
+            c["notes"] = json.dumps({
+                "rank_score": c.get("rank_score", 0.0),
+                "structural_signal_score": c.get("structural_signal_score", 0.0),
+                "pair_lag_score": c.get("pair_lag_score", 0.0),
+                "block_activity_score": c.get("block_activity_score", 0.0),
+                "gap_echo_score": c.get("gap_echo_score", 0.0),
+                "gap_family": c.get("gap_family", ""),
+                "selection_reason": c.get("selection_reason", ""),
+                "structural_notes": c.get("structural_notes", []),
+            })
+            
+        # Asignar etiquetas de letras
+        for idx, cand in enumerate(candidates):
+            cand["letter"] = chr(ord('A') + idx)
 
     # Save portfolio
     portfolio_id = save_thesis_portfolio(
@@ -482,6 +537,9 @@ def run_backtest_lab(
     seed: int = 42,
     use_ml: bool = False,
     log_fn: Callable[[str], None] | None = None,
+    use_structural_diversification: bool = False,
+    structural_diversity_weight: float = 1.0,
+    use_optimizer: bool = False,
 ) -> dict[str, Any]:
     from .historical_store import load_draw_history
     from .backtest_lab import run_backtest
@@ -509,7 +567,10 @@ def run_backtest_lab(
         seed=seed,
         game=game,
         use_ml=use_ml,
+        use_optimizer=use_optimizer,
         log_fn=log_fn,
+        use_structural_diversification=use_structural_diversification,
+        structural_diversity_weight=structural_diversity_weight,
     )
 
     html_path = Path("outputs") / "backtest_report.html"

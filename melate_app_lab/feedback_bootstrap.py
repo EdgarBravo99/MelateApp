@@ -58,6 +58,8 @@ def bootstrap_reviewed_portfolios(
     use_feedback_profile: bool = False,
     use_optimizer: bool = True,
     skip_existing: bool = True,
+    use_structural_diversification: bool = False,
+    structural_diversity_weight: float = 1.0,
 ) -> dict[str, Any]:
     """Crea carteras retrospectivas revisadas para alimentar el loop de retroalimentación (feedback loop).
     
@@ -105,6 +107,8 @@ def bootstrap_reviewed_portfolios(
             "use_feedback_profile": use_feedback_profile,
             "mark_all_as_played": mark_all_as_played,
             "high_redundancy_pairs": 0.0,
+            "use_structural_diversification": use_structural_diversification,
+            "structural_diversity_weight": structural_diversity_weight,
         }
 
     config_dict = {
@@ -113,6 +117,8 @@ def bootstrap_reviewed_portfolios(
         "top_k": top_k,
         "use_optimizer": use_optimizer,
         "use_feedback_profile": use_feedback_profile,
+        "use_structural_diversification": use_structural_diversification,
+        "structural_diversity_weight": structural_diversity_weight,
     }
 
     portfolios_created = 0
@@ -160,9 +166,19 @@ def bootstrap_reviewed_portfolios(
         # Rankear candidatos
         ranked = rank_candidates(cand_features, common_sigs, common_bands, weights=weights)
         
+        # Calcular senales estructurales si esta activo
+        if use_structural_diversification:
+            from .structural_signal_engine import compute_structural_signals_batch
+            ranked = compute_structural_signals_batch(ranked, prior_history, window=30, gap_window=50, max_lag=5)
+
         # Selección por optimizador o naive top_k
         if use_optimizer:
-            selected_portfolio = optimize_portfolio(ranked, top_k)
+            selected_portfolio = optimize_portfolio(
+                ranked,
+                top_k,
+                use_structural_diversification=use_structural_diversification,
+                structural_diversity_weight=structural_diversity_weight,
+            )
         else:
             selected_portfolio = ranked[:top_k]
 
@@ -196,6 +212,21 @@ def bootstrap_reviewed_portfolios(
                         evidence_draws.extend(edge_lookup[pair]["draws"])
             
             evidence_draws = sorted(list(set(evidence_draws)), reverse=True)[:5]
+            
+            if use_structural_diversification:
+                notes_field = json.dumps({
+                    "rank_score": c.get("rank_score", 0.0),
+                    "structural_signal_score": c.get("structural_signal_score", 0.0),
+                    "pair_lag_score": c.get("pair_lag_score", 0.0),
+                    "block_activity_score": c.get("block_activity_score", 0.0),
+                    "gap_echo_score": c.get("gap_echo_score", 0.0),
+                    "gap_family": c.get("gap_family", ""),
+                    "selection_reason": c.get("selection_reason", ""),
+                    "structural_notes": c.get("structural_notes", []),
+                })
+            else:
+                notes_field = f"Generado en bootstrap retrospectivo para sorteo {target_draw}"
+
             candidates_payload.append({
                 "numbers": nums,
                 "classification": strat,
@@ -207,7 +238,7 @@ def bootstrap_reviewed_portfolios(
                 "rank_score": c.get("rank_score", 0.0),
                 "pair_edges": pair_edges,
                 "evidence_draws": evidence_draws,
-                "notes": f"Generado en bootstrap retrospectivo para sorteo {target_draw}",
+                "notes": notes_field,
             })
 
         coverage = evaluate_portfolio_coverage(candidates_payload)
@@ -271,4 +302,7 @@ def bootstrap_reviewed_portfolios(
         "use_optimizer": use_optimizer,
         "use_feedback_profile": use_feedback_profile,
         "mark_all_as_played": mark_all_as_played,
+        "use_structural_diversification": use_structural_diversification,
+        "structural_diversity_weight": structural_diversity_weight,
     }
+

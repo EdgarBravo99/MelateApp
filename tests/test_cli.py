@@ -110,3 +110,103 @@ def test_workflow_loop_command_runs(tmp_path, monkeypatch):
     assert "evaluation" in result.output
 
 
+def test_cli_backtest_with_structural_diversification(tmp_path, monkeypatch):
+    import melate_app_lab.cli as cli
+    from melate_app_lab.historical_store import import_draws_to_memory
+
+    db_path = tmp_path / "data" / "memory.sqlite"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(cli, "DEFAULT_DB_PATH", db_path)
+
+    import melate_app_lab.desktop_controller as controller
+    monkeypatch.setattr(controller, "open_report", lambda path: {"opened": str(path)})
+
+    # Needs at least 15 draws for backtest to have 10 preceding history draws
+    dummy_history = []
+    for i in range(1, 16):
+        dummy_history.append({
+            "draw": 100 + i,
+            "numbers": [i, i+1, i+2, i+3, i+4, i+5],
+            "sum": 6*i + 15,
+            "sum_band": "low_band",
+            "block_signature": "6-0-0-0-0",
+            "block_presence_signature": "1-0-0-0-0",
+            "game": "revancha",
+            "date": "2026-05-29"
+        })
+    import_draws_to_memory(dummy_history, db_path)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "backtest",
+            "--limit",
+            "2",
+            "--game",
+            "revancha",
+            "--pool-size",
+            "10",
+            "--top-k",
+            "2",
+            "--seed",
+            "42",
+            "--use-structural-diversification",
+            "--structural-diversity-weight",
+            "1.5",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "ranker_unique_block_signatures" in result.output
+    assert "use_structural_diversification" in result.output
+
+
+def test_cli_bootstrap_feedback_with_structural_diversification(tmp_path, monkeypatch):
+    import melate_app_lab.cli as cli
+    from melate_app_lab.historical_store import import_draws_to_memory
+
+    db_path = tmp_path / "data" / "memory.sqlite"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(cli, "DEFAULT_DB_PATH", db_path)
+
+    # Needs at least 35 draws so prior_history >= 30 is true
+    dummy_history = []
+    for i in range(1, 36):
+        dummy_history.append({
+            "draw": 100 + i,
+            "numbers": [1, 2, 3, 4, 5, i % 50 + 6],
+            "sum": 15 + i % 50 + 6,
+            "sum_band": "low_band",
+            "block_signature": "6-0-0-0-0",
+            "block_presence_signature": "1-0-0-0-0",
+            "game": "revancha",
+            "date": "2026-05-29"
+        })
+    import_draws_to_memory(dummy_history, db_path)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "bootstrap-feedback",
+            "--limit",
+            "2",
+            "--game",
+            "revancha",
+            "--pool-size",
+            "10",
+            "--top-k",
+            "2",
+            "--seed",
+            "42",
+            "--use-structural-diversification",
+            "--structural-diversity-weight",
+            "1.2",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "portfolios_created" in result.output
+    assert "use_structural_diversification" in result.output
+
+
+
