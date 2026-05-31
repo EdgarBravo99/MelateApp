@@ -717,10 +717,36 @@ def launch_desktop() -> int:
 
     right_layout.addLayout(candidate_actions)
 
+    # Feedback learning panel
+    feedback_frame = QFrame()
+    feedback_frame.setObjectName("Panel")
+    feedback_frame.setStyleSheet("margin-top: 10px; padding: 10px; border: 1px solid #3d3d3d; border-radius: 6px;")
+    feedback_layout = QVBoxLayout(feedback_frame)
+    feedback_layout.setContentsMargins(10, 10, 10, 10)
+    feedback_layout.setSpacing(6)
+
+    feedback_header = QLabel("Aprendizaje y Recalibración Estructural:")
+    feedback_header.setStyleSheet("font-weight: bold; font-size: 13px; color: #ffffff;")
+    feedback_layout.addWidget(feedback_header)
+
+    profile_info_label = QLabel("Perfil de Feedback Activo: Ninguno (Usando pesos heurísticos baseline)")
+    profile_info_label.setStyleSheet("color: #aaaaaa;")
+    profile_info_label.setWordWrap(True)
+    feedback_layout.addWidget(profile_info_label)
+
+    learn_buttons_layout = QHBoxLayout()
+    learn_btn = QPushButton("Aprender de Historial (learn-feedback)")
+    learn_btn.setObjectName("PrimaryAction")
+    learn_buttons_layout.addWidget(learn_btn)
+    learn_buttons_layout.addStretch(1)
+    feedback_layout.addLayout(learn_buttons_layout)
+
+    right_layout.addWidget(feedback_frame)
+
     portfolio_splitter.addWidget(right_panel, 3)
     portfolio_layout.addLayout(portfolio_splitter)
 
-    action_buttons.extend([refresh_portfolios_btn, change_state_btn, eval_portfolio_btn, view_portfolio_report_btn])
+    action_buttons.extend([refresh_portfolios_btn, change_state_btn, eval_portfolio_btn, view_portfolio_report_btn, learn_btn])
 
     def refresh_portfolios():
         try:
@@ -796,16 +822,37 @@ def launch_desktop() -> int:
             return
         try:
             pid = int(portfolios_table.item(row, 0).text())
+            draw = int(portfolios_table.item(row, 1).text())
+            game = portfolios_table.item(row, 2).text()
 
-            def run_eval():
-                res = controller.evaluate_portfolio_against_history(DEFAULT_DB_PATH, pid)
-                return res
-
-            def on_eval_done(res):
+            # Intentar evaluar contra historial primero
+            res = controller.evaluate_portfolio_against_history(DEFAULT_DB_PATH, pid)
+            if res.get("evaluated", 0) > 0:
                 QMessageBox.information(window, "Evaluación Completa", res.get("message", "Evaluado con éxito."))
                 refresh_candidates(pid)
+                return
 
-            run_action("Probar Cartera", run_eval, True, on_eval_done)
+            # Si no esta en el historial, pedir entrada manual
+            from PySide6.QtWidgets import QInputDialog
+            text, ok = QInputDialog.getText(
+                window,
+                "Sorteo no encontrado",
+                f"El sorteo {draw} no está en el historial.\n"
+                f"Introduce los 6 números ganadores oficiales separados por espacios:"
+            )
+            if ok and text.strip():
+                def run_eval_manual():
+                    return controller.run_evaluate_portfolio(DEFAULT_DB_PATH, pid, text, game)
+
+                def on_eval_manual_done(res_manual):
+                    QMessageBox.information(
+                        window,
+                        "Evaluación Completa",
+                        f"Cartera evaluada contra resultado manual: {res_manual['result_numbers']}"
+                    )
+                    refresh_candidates(pid)
+
+                run_action("Probar Cartera Manual", run_eval_manual, True, on_eval_manual_done)
         except Exception as e:
             log(f"Error al evaluar cartera: {e}")
 
@@ -839,6 +886,55 @@ def launch_desktop() -> int:
             log(f"Error al abrir reporte de cartera: {e}")
 
     view_portfolio_report_btn.clicked.connect(view_portfolio_report_clicked)
+
+    def update_profile_info():
+        try:
+            p_row = portfolios_table.currentRow()
+            if p_row >= 0:
+                game = portfolios_table.item(p_row, 2).text()
+            else:
+                game = "revancha"
+            info = controller.load_active_profile_info(DEFAULT_DB_PATH, game)
+            if info:
+                metrics = info["metrics"]
+                profile_info_label.setText(
+                    f"Perfil ID: {info['id']} | Sorteos: {info['source_from_draw']} - {info['source_to_draw']} | "
+                    f"Baseline Score: {metrics.get('baseline_score')} | Optimized: {metrics.get('best_score')} "
+                    f"({info['algorithm']})"
+                )
+            else:
+                profile_info_label.setText("Perfil de Feedback Activo: Ninguno (Usando pesos heurísticos baseline)")
+        except Exception as e:
+            log(f"Error cargando informacion del perfil: {e}")
+
+    def learn_btn_clicked():
+        p_row = portfolios_table.currentRow()
+        game = portfolios_table.item(p_row, 2).text() if p_row >= 0 else "revancha"
+
+        def run_learn():
+            return controller.run_learn_feedback(DEFAULT_DB_PATH, game=game)
+
+        def on_learn_done(res):
+            if res.get("success"):
+                QMessageBox.information(
+                    window,
+                    "Aprendizaje Completo",
+                    f"Procesadas {res['reviewed_count']} carteras revisadas.\n"
+                    f"Estado del Perfil: {res['status']}\n"
+                    f"¿Activado automáticamente?: {'Sí' if res['activated'] else 'No'}\n"
+                    f"Score Optimizado: {res['optimized_score']} (Baseline: {res['baseline_score']})"
+                )
+                update_profile_info()
+            else:
+                QMessageBox.warning(window, "Aprendizaje", res.get("message", "No se pudo completar el aprendizaje."))
+
+        run_action("Ejecutando aprendizaje", run_learn, True, on_learn_done)
+
+    learn_btn.clicked.connect(learn_btn_clicked)
+
+    # Conectar update_profile_info a cambios de seleccion y actualizaciones
+    portfolios_table.itemSelectionChanged.connect(update_profile_info)
+    refresh_portfolios_btn.clicked.connect(update_profile_info)
 
     # SETTINGS PAGE
     settings_page, settings_layout = make_page()

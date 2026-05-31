@@ -66,6 +66,23 @@ def evaluate_portfolio_coverage(candidates: list[dict[str, Any]]) -> dict[str, A
     }
 
 
+def classify_candidate(features: dict[str, Any]) -> str:
+    """Clasifica un candidato basándose en sus características estructurales.
+    
+    alto graph_support -> relation
+    buena cobertura/firma -> balance
+    mezcla con alta diversidad -> contrast
+    """
+    support = features.get("graph_support_score", 0)
+    diversity = features.get("diversity_score", 0)
+    if support > 10:
+        return "relation"
+    elif diversity >= 4:
+        return "balance"
+    else:
+        return "contrast"
+
+
 def run_unified_workflow(
     db_path: str | Path,
     draw: int,
@@ -74,6 +91,7 @@ def run_unified_workflow(
     seed: int = 42,
     played_indices: list[int] | None = None,
     result_numbers: list[int] | None = None,
+    top_k: int = 10,
     log_fn: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Execute the interactive workflow loop of Thesis -> Portfolio -> Play -> Evaluate."""
@@ -97,7 +115,12 @@ def run_unified_workflow(
 
     common_sigs = analysis.get("common_signatures", [])
     common_bands = analysis.get("common_bands", [])
-    ranked = rank_candidates(cand_features, common_sigs, common_bands)
+    
+    from .thesis_memory import get_active_feedback_profile
+    active_profile = get_active_feedback_profile(db_path, game)
+    weights = active_profile["weights"] if active_profile else None
+    
+    ranked = rank_candidates(cand_features, common_sigs, common_bands, weights=weights)
 
     # 2. Build candidates payload (taking top 10 ranked)
     candidates_payload = []
@@ -113,11 +136,12 @@ def run_unified_workflow(
                 "draws": edge.get("draws", []),
             }
 
-    for idx, c in enumerate(ranked[:10]):
+    from .portfolio_optimizer import optimize_portfolio
+    selected_portfolio = optimize_portfolio(ranked, top_k)
+
+    for idx, c in enumerate(selected_portfolio):
         # Strategy classification based on candidate details
-        strat = "relation" if c["graph_support_score"] > 5 else "balance"
-        if idx % 3 == 0:
-            strat = "contrast"
+        strat = classify_candidate(c)
 
         # Reconstruct detailed pair_edges and evidence_draws
         pair_edges = []

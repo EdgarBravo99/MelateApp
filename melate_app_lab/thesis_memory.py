@@ -104,6 +104,40 @@ def _init_db(db_path: str | Path) -> None:
         except sqlite3.OperationalError:
             pass  # Already exists
 
+        conn.execute(
+            """
+            create table if not exists experiment_runs (
+                id integer primary key autoincrement,
+                created_at text default current_timestamp,
+                game text not null,
+                commit_sha text not null,
+                branch text not null,
+                config_json text not null,
+                metrics_json text not null,
+                report_paths text not null
+            )
+            """
+        )
+        conn.execute(
+            """
+            create table if not exists feedback_profiles (
+                id integer primary key autoincrement,
+                game text not null,
+                created_at text default current_timestamp,
+                source_from_draw integer not null,
+                source_to_draw integer not null,
+                objective text not null,
+                algorithm text not null,
+                seed integer,
+                config_json text not null,
+                weights_json text not null,
+                metrics_json text not null,
+                active integer default 0
+            )
+            """
+        )
+
+
 
 
 def _validate_memory_text(draw: int, text: str, field: str) -> None:
@@ -374,3 +408,183 @@ def update_candidate_review_result(
             """,
             (json.dumps(result_numbers), hits_count, candidate_id),
         )
+
+
+def save_experiment_run(
+    db_path: str | Path,
+    game: str,
+    commit_sha: str,
+    branch: str,
+    config: dict[str, Any],
+    metrics: dict[str, Any],
+    report_paths: list[str],
+) -> int:
+    _init_db(db_path)
+    with _connection_context(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            insert into experiment_runs (
+                game, commit_sha, branch, config_json, metrics_json, report_paths
+            ) values (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                game,
+                commit_sha,
+                branch,
+                json.dumps(config),
+                json.dumps(metrics),
+                json.dumps(report_paths),
+            ),
+        )
+        return cursor.lastrowid
+
+
+def load_experiment_runs(db_path: str | Path, limit: int = 10) -> list[dict[str, Any]]:
+    _init_db(db_path)
+    with _connection_context(db_path) as conn:
+        rows = conn.execute(
+            """
+            select id, created_at, game, commit_sha, branch, config_json, metrics_json, report_paths
+            from experiment_runs
+            order by id desc
+            limit ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [
+        {
+            "id": row[0],
+            "created_at": row[1],
+            "game": row[2],
+            "commit_sha": row[3],
+            "branch": row[4],
+            "config": json.loads(row[5]),
+            "metrics": json.loads(row[6]),
+            "report_paths": json.loads(row[7]),
+        }
+        for row in rows
+    ]
+
+
+def save_feedback_profile(
+    db_path: str | Path,
+    game: str,
+    source_from_draw: int,
+    source_to_draw: int,
+    objective: str,
+    algorithm: str,
+    seed: int | None,
+    config: dict[str, Any],
+    weights: dict[str, Any],
+    metrics: dict[str, Any],
+    active: int = 0,
+) -> int:
+    _init_db(db_path)
+    with _connection_context(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            insert into feedback_profiles (
+                game, source_from_draw, source_to_draw, objective, algorithm,
+                seed, config_json, weights_json, metrics_json, active
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                game,
+                source_from_draw,
+                source_to_draw,
+                objective,
+                algorithm,
+                seed,
+                json.dumps(config),
+                json.dumps(weights),
+                json.dumps(metrics),
+                active,
+            ),
+        )
+        return cursor.lastrowid
+
+
+def get_active_feedback_profile(db_path: str | Path, game: str) -> dict[str, Any] | None:
+    _init_db(db_path)
+    with _connection_context(db_path) as conn:
+        row = conn.execute(
+            """
+            select id, source_from_draw, source_to_draw, objective, algorithm,
+                   seed, config_json, weights_json, metrics_json, active, created_at
+            from feedback_profiles
+            where game = ? and active = 1
+            order by id desc
+            limit 1
+            """,
+            (game,),
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "game": game,
+        "source_from_draw": row[1],
+        "source_to_draw": row[2],
+        "objective": row[3],
+        "algorithm": row[4],
+        "seed": row[5],
+        "config": json.loads(row[6]),
+        "weights": json.loads(row[7]),
+        "metrics": json.loads(row[8]),
+        "active": bool(row[9]),
+        "created_at": row[10],
+    }
+
+
+def deactivate_all_feedback_profiles(db_path: str | Path, game: str) -> None:
+    _init_db(db_path)
+    with _connection_context(db_path) as conn:
+        conn.execute(
+            "update feedback_profiles set active = 0 where game = ?",
+            (game,),
+        )
+
+
+def set_feedback_profile_active(db_path: str | Path, profile_id: int, active: int) -> None:
+    _init_db(db_path)
+    with _connection_context(db_path) as conn:
+        conn.execute(
+            "update feedback_profiles set active = ? where id = ?",
+            (active, profile_id),
+        )
+
+
+def load_feedback_profiles(db_path: str | Path, game: str, limit: int = 10) -> list[dict[str, Any]]:
+    _init_db(db_path)
+    with _connection_context(db_path) as conn:
+        rows = conn.execute(
+            """
+            select id, source_from_draw, source_to_draw, objective, algorithm,
+                   seed, config_json, weights_json, metrics_json, active, created_at
+            from feedback_profiles
+            where game = ?
+            order by id desc
+            limit ?
+            """,
+            (game, limit),
+        ).fetchall()
+    return [
+        {
+            "id": row[0],
+            "game": game,
+            "source_from_draw": row[1],
+            "source_to_draw": row[2],
+            "objective": row[3],
+            "algorithm": row[4],
+            "seed": row[5],
+            "config": json.loads(row[6]),
+            "weights": json.loads(row[7]),
+            "metrics": json.loads(row[8]),
+            "active": bool(row[9]),
+            "created_at": row[10],
+        }
+        for row in rows
+    ]
+

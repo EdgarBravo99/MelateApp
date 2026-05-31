@@ -340,3 +340,38 @@ def llm_status_command() -> None:
     from .llm_provider import get_llm_config
 
     _json(get_llm_config())
+
+
+@app.command("evaluate-portfolio")
+def evaluate_portfolio_cmd(
+    portfolio_id: Annotated[int, typer.Option("--portfolio-id")],
+    result: Annotated[str, typer.Option("--result")],
+    game: Annotated[str, typer.Option("--game")] = "revancha",
+) -> None:
+    """Evalua una cartera de candidatos existente contra un resultado oficial sin generar nuevos candidatos."""
+    from .portfolio_evaluator import evaluate_existing_portfolio
+    result_numbers = parse_numbers(result)
+    res = evaluate_existing_portfolio(
+        db_path=DEFAULT_DB_PATH,
+        portfolio_id=portfolio_id,
+        result_numbers=result_numbers,
+        game=game,
+        persist=True,
+    )
+    _json(res)
+
+
+@app.command("learn-feedback")
+def learn_feedback_cmd(
+    game: Annotated[str, typer.Option("--game")] = "revancha",
+    seed: Annotated[int, typer.Option("--seed")] = 42,
+) -> None:
+    """Ejecuta el aprendizaje sobre carteras revisadas para recalibrar pesos."""
+    from .feedback_learner import learn_from_reviewed_portfolios
+    res = learn_from_reviewed_portfolios(
+        db_path=DEFAULT_DB_PATH,
+        game=game,
+        seed=seed,
+    )
+    _json(res)
+

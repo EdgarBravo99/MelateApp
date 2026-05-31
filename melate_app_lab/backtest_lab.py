@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import logging
 import random
-from typing import Any
+from pathlib import Path
+from typing import Any, Callable
 
 from .candidate_ranker import rank_candidates
 from .candidate_search import search_candidates
 from .candidate_generator import analyze_time_window
-from .feature_extractor import extract_features
+from .feature_extractor import extract_features_batch
 from .relation_graph import build_historical_relation_graph
 from .ml_ranker import is_ml_available, train_ml_ranker, rank_candidates_ml
+from .experiment_registry import build_manifest
+from .thesis_memory import save_experiment_run
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +49,9 @@ def run_backtest(
     seed: int = 42,
     game: str = "revancha",
     use_ml: bool = False,
+    use_optimizer: bool = False,
+    use_feedback_profile: bool = False,
+    db_path: str | Path | None = None,
     log_fn: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Execute a walk-forward retrospective evaluation of candidates against historical draws.
@@ -92,19 +98,13 @@ def run_backtest(
         # 1. Candidate Generation & Feature Extraction
         candidate_pool = search_candidates(analysis, pool_size=pool_size, seed=seed + target_draw)
 
-        cand_features = []
-        for cand in candidate_pool:
-            feats = extract_features(cand, train_history, prior_history, graph_data)
-            cand_features.append(feats)
+        cand_features = extract_features_batch(candidate_pool, train_history, prior_history, graph_data)
 
         # 2. Random Baseline Generation & Feature Extraction
         historical_sets = {frozenset(d["numbers"]) for d in prior_history}
         baseline_pool = generate_random_combinations(pool_size, historical_sets, seed=seed + target_draw + 1)
 
-        baseline_features = []
-        for base_cand in baseline_pool:
-            feats = extract_features(base_cand, train_history, prior_history, graph_data)
-            baseline_features.append(feats)
+        baseline_features = extract_features_batch(baseline_pool, train_history, prior_history, graph_data)
 
         # 3. Ranking
         common_sigs = analysis.get("common_signatures", [])
@@ -185,9 +185,33 @@ def run_backtest(
         "baseline_4plus_rate": round(baseline_4plus_draws / draws_count * 100, 1),
     }
 
+    manifest = build_manifest(
+        game=game,
+        window=window,
+        limit=len(target_draws),
+        pool_size=pool_size,
+        top_k=top_k,
+        seed=seed,
+        model_name="ml" if actual_use_ml else "heuristic",
+        use_optimizer=use_optimizer,
+        use_feedback_profile=use_feedback_profile,
+    )
+
+    if db_path:
+        save_experiment_run(
+            db_path=db_path,
+            game=game,
+            commit_sha=manifest["commit_sha"],
+            branch=manifest["branch"],
+            config=manifest,
+            metrics=aggregated,
+            report_paths=[],
+        )
+
     return {
         "game": game,
         "draws_evaluated": draws_count,
         "metrics": aggregated,
         "results": results,
+        "manifest": manifest,
     }
