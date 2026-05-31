@@ -1140,7 +1140,7 @@ def launch_desktop() -> int:
     run_manual_btn.clicked.connect(run_manual_verification)
     save_manual_btn.clicked.connect(save_manual_portfolio_clicked)
 
-    verificador_manual_layout.addWidget(manual_splitter, 1)
+    verificador_manual_layout.addLayout(manual_splitter, 1)
 
 
     # PAGE 6: APRENDIZAJE (Feedback Learner & Bootstrap Profiles)
