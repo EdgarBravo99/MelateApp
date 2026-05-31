@@ -76,7 +76,11 @@ def test_experiment_registry():
     assert "python_version" in manifest
 
 
-def test_portfolio_evaluator_strict(tmp_path):
+def test_portfolio_evaluator_strict(tmp_path, monkeypatch):
+    def mock_search(*args, **kwargs):
+        raise RuntimeError("search_candidates was called!")
+    monkeypatch.setattr("melate_app_lab.portfolio_evaluator.search_candidates", mock_search, raising=False)
+    monkeypatch.setattr("melate_app_lab.workflow_loop.search_candidates", mock_search, raising=False)
     db_path = tmp_path / "data" / "test_memory.db"
     
     # Pre-init tables and save a portfolio
@@ -200,3 +204,47 @@ def test_ml_ranker_zoo():
     ranked = rank_candidates_ml(model, candidates_features, [], [])
     assert len(ranked) == 1
     assert "rank_score" in ranked[0]
+
+
+def test_use_feedback_profile_changes_ranking():
+    from melate_app_lab.candidate_ranker import rank_candidates
+    candidates = [
+        {"numbers": [1, 2, 3, 4, 5, 6], "sum": 21, "graph_support_score": 10},
+        {"numbers": [10, 11, 12, 13, 14, 15], "sum": 75, "graph_support_score": 2},
+    ]
+    ranked_default = rank_candidates(candidates, [], [])
+    assert ranked_default[0]["numbers"] == [1, 2, 3, 4, 5, 6]
+
+    weights = {"graph_support_score": -10.0}
+    ranked_custom = rank_candidates(candidates, [], [], weights=weights)
+    assert ranked_custom[0]["numbers"] == [10, 11, 12, 13, 14, 15]
+
+
+def test_use_optimizer_reduces_overlap():
+    from melate_app_lab.portfolio_optimizer import optimize_portfolio
+    from melate_app_lab.metrics import average_internal_overlap
+    candidates = [
+        {"numbers": [1, 2, 3, 4, 5, 6], "rank_score": 10.0},
+        {"numbers": [1, 2, 3, 4, 7, 8], "rank_score": 9.5},
+        {"numbers": [11, 12, 13, 14, 15, 16], "rank_score": 8.0},
+    ]
+    naive_portfolio = candidates[:2]
+    naive_overlap = average_internal_overlap([c["numbers"] for c in naive_portfolio])
+    assert naive_overlap == 4.0
+    
+    optimized_portfolio = optimize_portfolio(candidates, top_k=2)
+    optimized_overlap = average_internal_overlap([c["numbers"] for c in optimized_portfolio])
+    assert optimized_overlap == 0.0
+    assert optimized_overlap < naive_overlap
+
+
+def test_manifest_and_reproducibility():
+    manifest1 = build_manifest(game="revancha", window=30, limit=10, pool_size=100, top_k=5, seed=123, model_name="heuristic", use_optimizer=True, use_feedback_profile=False)
+    manifest2 = build_manifest(game="revancha", window=30, limit=10, pool_size=100, top_k=5, seed=123, model_name="heuristic", use_optimizer=False, use_feedback_profile=False)
+    assert json.dumps(manifest1, sort_keys=True) != json.dumps(manifest2, sort_keys=True)
+    
+    from melate_app_lab.candidate_search import search_candidates
+    analysis = {"common_signatures": [], "common_bands": [], "frequencies": {}}
+    pool1 = search_candidates(analysis, pool_size=10, seed=42)
+    pool2 = search_candidates(analysis, pool_size=10, seed=42)
+    assert pool1 == pool2

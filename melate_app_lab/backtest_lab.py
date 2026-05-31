@@ -13,6 +13,7 @@ from .relation_graph import build_historical_relation_graph
 from .ml_ranker import is_ml_available, train_ml_ranker, rank_candidates_ml
 from .experiment_registry import build_manifest
 from .thesis_memory import save_experiment_run
+from .metrics import rate_2plus, unique_hits_union, average_internal_overlap, high_redundancy_pairs
 
 logger = logging.getLogger(__name__)
 
@@ -107,8 +108,16 @@ def run_backtest(
         baseline_features = extract_features_batch(baseline_pool, train_history, prior_history, graph_data)
 
         # 3. Ranking
+        # 3. Ranking
         common_sigs = analysis.get("common_signatures", [])
         common_bands = analysis.get("common_bands", [])
+
+        weights = None
+        if use_feedback_profile and db_path:
+            from .thesis_memory import get_active_feedback_profile
+            active_profile = get_active_feedback_profile(db_path, game)
+            if active_profile:
+                weights = active_profile["weights"]
 
         if actual_use_ml:
             prior_draw_ids = [d["draw"] for d in prior_history]
@@ -119,12 +128,17 @@ def run_backtest(
             ranked_candidates = rank_candidates_ml(model, cand_features, common_sigs, common_bands)
             ranked_baseline = rank_candidates_ml(model, baseline_features, common_sigs, common_bands)
         else:
-            ranked_candidates = rank_candidates(cand_features, common_sigs, common_bands)
-            ranked_baseline = rank_candidates(baseline_features, common_sigs, common_bands)
+            ranked_candidates = rank_candidates(cand_features, common_sigs, common_bands, weights=weights)
+            ranked_baseline = rank_candidates(baseline_features, common_sigs, common_bands, weights=weights)
 
         # 4. Score & Hits Evaluation
-        top_candidates = ranked_candidates[:top_k]
-        top_baseline = ranked_baseline[:top_k]
+        if use_optimizer:
+            from .portfolio_optimizer import optimize_portfolio
+            top_candidates = optimize_portfolio(ranked_candidates, top_k)
+            top_baseline = optimize_portfolio(ranked_baseline, top_k)
+        else:
+            top_candidates = ranked_candidates[:top_k]
+            top_baseline = ranked_baseline[:top_k]
 
         cand_hits = [len(set(c["numbers"]) & target_set) for c in top_candidates]
         base_hits = [len(set(b["numbers"]) & target_set) for b in top_baseline]
@@ -149,6 +163,14 @@ def run_backtest(
             "baseline_all_mean_hits": sum(all_base_hits) / len(all_base_hits) if all_base_hits else 0.0,
             "ranker_hits_distribution": get_dist(cand_hits),
             "baseline_hits_distribution": get_dist(base_hits),
+            "ranker_rate_2plus": rate_2plus(cand_hits),
+            "baseline_rate_2plus": rate_2plus(base_hits),
+            "ranker_unique_hits_union": unique_hits_union([c["numbers"] for c in top_candidates], target_numbers),
+            "baseline_unique_hits_union": unique_hits_union([b["numbers"] for b in top_baseline], target_numbers),
+            "ranker_average_internal_overlap": average_internal_overlap([c["numbers"] for c in top_candidates]),
+            "baseline_average_internal_overlap": average_internal_overlap([b["numbers"] for b in top_baseline]),
+            "ranker_high_redundancy_pairs": high_redundancy_pairs([c["numbers"] for c in top_candidates]),
+            "baseline_high_redundancy_pairs": high_redundancy_pairs([b["numbers"] for b in top_baseline]),
         }
         results.append(draw_metrics)
 
@@ -183,6 +205,14 @@ def run_backtest(
         "baseline_3plus_rate": round(baseline_3plus_draws / draws_count * 100, 1),
         "ranker_4plus_rate": round(ranker_4plus_draws / draws_count * 100, 1),
         "baseline_4plus_rate": round(baseline_4plus_draws / draws_count * 100, 1),
+        "ranker_rate_2plus": round(sum(r["ranker_rate_2plus"] for r in results) / draws_count, 2),
+        "baseline_rate_2plus": round(sum(r["baseline_rate_2plus"] for r in results) / draws_count, 2),
+        "ranker_unique_hits_union": round(sum(r["ranker_unique_hits_union"] for r in results) / draws_count, 2),
+        "baseline_unique_hits_union": round(sum(r["baseline_unique_hits_union"] for r in results) / draws_count, 2),
+        "ranker_average_internal_overlap": round(sum(r["ranker_average_internal_overlap"] for r in results) / draws_count, 2),
+        "baseline_average_internal_overlap": round(sum(r["baseline_average_internal_overlap"] for r in results) / draws_count, 2),
+        "ranker_high_redundancy_pairs": round(sum(r["ranker_high_redundancy_pairs"] for r in results) / draws_count, 2),
+        "baseline_high_redundancy_pairs": round(sum(r["baseline_high_redundancy_pairs"] for r in results) / draws_count, 2),
     }
 
     manifest = build_manifest(

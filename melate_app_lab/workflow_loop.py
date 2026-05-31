@@ -92,6 +92,8 @@ def run_unified_workflow(
     played_indices: list[int] | None = None,
     result_numbers: list[int] | None = None,
     top_k: int = 10,
+    use_optimizer: bool = True,
+    use_feedback_profile: bool = True,
     log_fn: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Execute the interactive workflow loop of Thesis -> Portfolio -> Play -> Evaluate."""
@@ -116,9 +118,12 @@ def run_unified_workflow(
     common_sigs = analysis.get("common_signatures", [])
     common_bands = analysis.get("common_bands", [])
     
-    from .thesis_memory import get_active_feedback_profile
-    active_profile = get_active_feedback_profile(db_path, game)
-    weights = active_profile["weights"] if active_profile else None
+    weights = None
+    if use_feedback_profile:
+        from .thesis_memory import get_active_feedback_profile
+        active_profile = get_active_feedback_profile(db_path, game)
+        if active_profile:
+            weights = active_profile["weights"]
     
     ranked = rank_candidates(cand_features, common_sigs, common_bands, weights=weights)
 
@@ -136,8 +141,11 @@ def run_unified_workflow(
                 "draws": edge.get("draws", []),
             }
 
-    from .portfolio_optimizer import optimize_portfolio
-    selected_portfolio = optimize_portfolio(ranked, top_k)
+    if use_optimizer:
+        from .portfolio_optimizer import optimize_portfolio
+        selected_portfolio = optimize_portfolio(ranked, top_k)
+    else:
+        selected_portfolio = ranked[:top_k]
 
     for idx, c in enumerate(selected_portfolio):
         # Strategy classification based on candidate details

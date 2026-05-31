@@ -820,41 +820,46 @@ def launch_desktop() -> int:
         if row < 0:
             QMessageBox.warning(window, "Advertencia", "Selecciona una cartera de la tabla de carteras.")
             return
+
         try:
             pid = int(portfolios_table.item(row, 0).text())
             draw = int(portfolios_table.item(row, 1).text())
             game = portfolios_table.item(row, 2).text()
+        except Exception as e:
+            log(f"Error al leer la cartera seleccionada: {e}")
+            return
 
-            # Intentar evaluar contra historial primero
-            res = controller.evaluate_portfolio_against_history(DEFAULT_DB_PATH, pid)
+        def run_auto_eval():
+            return controller.evaluate_portfolio_against_history(DEFAULT_DB_PATH, pid)
+            
+        def on_auto_eval_done(res):
             if res.get("evaluated", 0) > 0:
                 QMessageBox.information(window, "Evaluación Completa", res.get("message", "Evaluado con éxito."))
                 refresh_candidates(pid)
-                return
+            else:
+                # Si no esta en el historial, pedir entrada manual
+                from PySide6.QtWidgets import QInputDialog
+                text, ok = QInputDialog.getText(
+                    window,
+                    "Sorteo no encontrado",
+                    f"El sorteo {draw} no está en el historial.\n"
+                    f"Introduce los 6 números ganadores oficiales separados por espacios:"
+                )
+                if ok and text.strip():
+                    def run_eval_manual():
+                        return controller.run_evaluate_portfolio(DEFAULT_DB_PATH, pid, text, game)
 
-            # Si no esta en el historial, pedir entrada manual
-            from PySide6.QtWidgets import QInputDialog
-            text, ok = QInputDialog.getText(
-                window,
-                "Sorteo no encontrado",
-                f"El sorteo {draw} no está en el historial.\n"
-                f"Introduce los 6 números ganadores oficiales separados por espacios:"
-            )
-            if ok and text.strip():
-                def run_eval_manual():
-                    return controller.run_evaluate_portfolio(DEFAULT_DB_PATH, pid, text, game)
+                    def on_eval_manual_done(res_manual):
+                        QMessageBox.information(
+                            window,
+                            "Evaluación Completa",
+                            f"Cartera evaluada contra resultado manual: {res_manual['result_numbers']}"
+                        )
+                        refresh_candidates(pid)
 
-                def on_eval_manual_done(res_manual):
-                    QMessageBox.information(
-                        window,
-                        "Evaluación Completa",
-                        f"Cartera evaluada contra resultado manual: {res_manual['result_numbers']}"
-                    )
-                    refresh_candidates(pid)
+                    run_action("Probar Cartera Manual", run_eval_manual, True, on_eval_manual_done)
 
-                run_action("Probar Cartera Manual", run_eval_manual, True, on_eval_manual_done)
-        except Exception as e:
-            log(f"Error al evaluar cartera: {e}")
+        run_action("Probar contra Histórico", run_auto_eval, True, on_auto_eval_done)
 
     eval_portfolio_btn.clicked.connect(eval_portfolio_clicked)
 
