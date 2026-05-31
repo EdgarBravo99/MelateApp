@@ -386,6 +386,9 @@ def bootstrap_feedback_cmd(
     top_k: Annotated[int, typer.Option("--top-k")] = 10,
     seed: Annotated[int, typer.Option("--seed")] = 42,
     mark_all_as_played: Annotated[bool, typer.Option("--mark-all-as-played/--no-mark-all-as-played")] = True,
+    use_feedback_profile: Annotated[bool, typer.Option("--use-feedback-profile/--no-use-feedback-profile")] = False,
+    use_optimizer: Annotated[bool, typer.Option("--use-optimizer/--no-use-optimizer")] = True,
+    skip_existing: Annotated[bool, typer.Option("--skip-existing/--no-skip-existing")] = True,
 ) -> None:
     """Bootstrap de carteras revisadas históricas retrospectivas."""
     from .feedback_bootstrap import bootstrap_reviewed_portfolios
@@ -399,6 +402,9 @@ def bootstrap_feedback_cmd(
         top_k=top_k,
         seed=seed,
         mark_all_as_played=mark_all_as_played,
+        use_feedback_profile=use_feedback_profile,
+        use_optimizer=use_optimizer,
+        skip_existing=skip_existing,
     )
     _json(res)
 

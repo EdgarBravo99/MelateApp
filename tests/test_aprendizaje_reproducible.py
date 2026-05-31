@@ -305,7 +305,7 @@ def test_feedback_bootstrap(tmp_path, monkeypatch):
             
     conn.close()
     
-    res_large_limit = bootstrap_reviewed_portfolios(db_path, game="revancha", limit=40, pool_size=50, top_k=5, seed=42)
+    res_large_limit = bootstrap_reviewed_portfolios(db_path, game="revancha", limit=40, pool_size=50, top_k=5, seed=42, skip_existing=False)
     assert res_large_limit["success"] is True
     assert res_large_limit["portfolios_created"] == 20
     
@@ -322,7 +322,7 @@ def test_feedback_bootstrap(tmp_path, monkeypatch):
         insert_draw_record(conn2, record, commit=True, ensure_schema=True)
     conn2.close()
     
-    res1 = bootstrap_reviewed_portfolios(db_path2, game="revancha", limit=5, pool_size=50, top_k=5, seed=42)
+    res1 = bootstrap_reviewed_portfolios(db_path2, game="revancha", limit=5, pool_size=50, top_k=5, seed=42, skip_existing=False)
     
     conn2 = sqlite3.connect(db_path2)
     conn2.execute("delete from thesis_candidates")
@@ -330,10 +330,82 @@ def test_feedback_bootstrap(tmp_path, monkeypatch):
     conn2.commit()
     conn2.close()
     
-    res2 = bootstrap_reviewed_portfolios(db_path2, game="revancha", limit=5, pool_size=50, top_k=5, seed=42)
+    res2 = bootstrap_reviewed_portfolios(db_path2, game="revancha", limit=5, pool_size=50, top_k=5, seed=42, skip_existing=False)
     
     assert res1["avg_max_hits"] == res2["avg_max_hits"]
     assert res1["rate_2plus"] == res2["rate_2plus"]
     assert res1["rate_3plus"] == res2["rate_3plus"]
     assert res1["unique_hits_union_avg"] == res2["unique_hits_union_avg"]
     assert res1["average_internal_overlap"] == res2["average_internal_overlap"]
+
+
+def test_feedback_bootstrap_custom_rules(tmp_path):
+    from melate_app_lab.feedback_bootstrap import bootstrap_reviewed_portfolios
+    from melate_app_lab.historical_store import insert_draw_record
+    import sqlite3
+    import json
+
+    db_path = tmp_path / "data" / "test_bootstrap_custom.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    conn = sqlite3.connect(db_path)
+    for draw in range(1, 40):
+        record = {
+            "game": "revancha",
+            "draw": draw,
+            "date": "2026-05-30",
+            "numbers": [1, 2, 3, 4, 5, draw % 40 + 6],
+        }
+        insert_draw_record(conn, record, commit=True, ensure_schema=True)
+    conn.close()
+
+    # 1. Test: no feedback profile por defecto (use_feedback_profile=False)
+    # 2. Test: summary trae configuración completa
+    res = bootstrap_reviewed_portfolios(db_path, game="revancha", limit=5, pool_size=50, top_k=5, seed=42)
+    assert res["success"] is True
+    assert res["use_feedback_profile"] is False
+    assert res["use_optimizer"] is True
+    assert "seed" in res
+    assert "pool_size" in res
+    assert "top_k" in res
+    assert "from_draw" in res
+    assert "to_draw" in res
+    assert "mark_all_as_played" in res
+    assert "skipped_draws" in res
+    assert "high_redundancy_pairs" in res
+
+    # Check if the notes of the saved portfolios register config
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    notes_str = cursor.execute("select notes from thesis_portfolios order by id desc limit 1").fetchone()[0]
+    notes = json.loads(notes_str)
+    assert "bootstrap_config" in notes
+    assert notes["bootstrap_config"]["use_feedback_profile"] is False
+    assert notes["bootstrap_config"]["use_optimizer"] is True
+    conn.close()
+
+    # 3. Test: skip_existing evita duplicados
+    # Running again with skip_existing=True should skip all 5 draws
+    res_skipped = bootstrap_reviewed_portfolios(db_path, game="revancha", limit=5, pool_size=50, top_k=5, seed=42, skip_existing=True)
+    assert res_skipped["success"] is True
+    assert res_skipped["portfolios_created"] == 0
+    assert len(res_skipped["skipped_draws"]) == 5
+
+    # 4. Test: no optimizer cuando se desactiva
+    conn = sqlite3.connect(db_path)
+    conn.execute("delete from thesis_candidates")
+    conn.execute("delete from thesis_portfolios")
+    conn.commit()
+    conn.close()
+
+    res_no_opt = bootstrap_reviewed_portfolios(db_path, game="revancha", limit=5, pool_size=50, top_k=5, seed=42, use_optimizer=False)
+    assert res_no_opt["success"] is True
+    assert res_no_opt["use_optimizer"] is False
+    
+    # Check notes register use_optimizer=False
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    notes_str = cursor.execute("select notes from thesis_portfolios order by id desc limit 1").fetchone()[0]
+    notes = json.loads(notes_str)
+    assert notes["bootstrap_config"]["use_optimizer"] is False
+    conn.close()

@@ -20,6 +20,31 @@ from .metrics import calculate_hits
 logger = logging.getLogger(__name__)
 
 
+def _is_draw_already_bootstrapped(db_path: Path, draw: int, game: str, config: dict[str, Any]) -> bool:
+    """Verifica si ya existe un portafolio de bootstrap con exactamente la misma configuración."""
+    import sqlite3
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.execute(
+                "select notes from thesis_portfolios where draw = ? and game = ?",
+                (draw, game)
+            )
+            for row in cursor.fetchall():
+                notes_str = row[0]
+                if not notes_str:
+                    continue
+                try:
+                    notes = json.loads(notes_str)
+                    existing_config = notes.get("bootstrap_config")
+                    if existing_config == config:
+                        return True
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return False
+
+
 def bootstrap_reviewed_portfolios(
     db_path: str | Path,
     game: str = "revancha",
@@ -30,6 +55,9 @@ def bootstrap_reviewed_portfolios(
     top_k: int = 10,
     seed: int = 42,
     mark_all_as_played: bool = True,
+    use_feedback_profile: bool = False,
+    use_optimizer: bool = True,
+    skip_existing: bool = True,
 ) -> dict[str, Any]:
     """Crea carteras retrospectivas revisadas para alimentar el loop de retroalimentación (feedback loop).
     
@@ -67,21 +95,46 @@ def bootstrap_reviewed_portfolios(
             "message": "No se encontraron sorteos elegibles en el historial.",
             "portfolios_created": 0,
             "draws_processed": [],
+            "skipped_draws": [],
+            "seed": seed,
+            "pool_size": pool_size,
+            "top_k": top_k,
+            "from_draw": from_draw,
+            "to_draw": to_draw,
+            "use_optimizer": use_optimizer,
+            "use_feedback_profile": use_feedback_profile,
+            "mark_all_as_played": mark_all_as_played,
+            "high_redundancy_pairs": 0.0,
         }
+
+    config_dict = {
+        "seed": seed,
+        "pool_size": pool_size,
+        "top_k": top_k,
+        "use_optimizer": use_optimizer,
+        "use_feedback_profile": use_feedback_profile,
+    }
 
     portfolios_created = 0
     draws_processed = []
+    skipped_draws = []
     all_max_hits = []
     rate_2plus_list = []
     rate_3plus_list = []
     unique_hits_union_list = []
     average_internal_overlaps = []
+    high_redundancy_pairs_list = []
 
     for d in target_draws:
         target_draw = d["draw"]
         target_numbers = d["numbers"]
 
-        # Evitar lookahead bias: solo historial estrictamente menor al target_draw
+        # Evitar duplicados
+        if skip_existing and _is_draw_already_bootstrapped(db_path, target_draw, game, config_dict):
+            skipped_draws.append(target_draw)
+            continue
+
+        # Evitar lookahead bias: solo historial strictly menor al target_draw
         prior_history = [x for x in filtered_history if x["draw"] < target_draw]
         
         # Pipeline idéntico a producción
@@ -98,15 +151,20 @@ def bootstrap_reviewed_portfolios(
         common_sigs = analysis.get("common_signatures", [])
         common_bands = analysis.get("common_bands", [])
         
-        # Aplicar feedback profile si existe
-        active_profile = get_active_feedback_profile(db_path, game)
-        weights = active_profile["weights"] if active_profile else None
+        # Aplicar feedback profile si use_feedback_profile=True y existe
+        weights = None
+        if use_feedback_profile:
+            active_profile = get_active_feedback_profile(db_path, game)
+            weights = active_profile["weights"] if active_profile else None
         
         # Rankear candidatos
         ranked = rank_candidates(cand_features, common_sigs, common_bands, weights=weights)
         
-        # Optimizar cartera (diversidad y solapamiento)
-        selected_portfolio = optimize_portfolio(ranked, top_k)
+        # Selección por optimizador o naive top_k
+        if use_optimizer:
+            selected_portfolio = optimize_portfolio(ranked, top_k)
+        else:
+            selected_portfolio = ranked[:top_k]
 
         # Construir estructura para persistencia
         edge_lookup = {}
@@ -153,7 +211,12 @@ def bootstrap_reviewed_portfolios(
             })
 
         coverage = evaluate_portfolio_coverage(candidates_payload)
-        notes_payload = json.dumps({"coverage": coverage})
+        
+        notes_dict = {
+            "coverage": coverage,
+            "bootstrap_config": config_dict
+        }
+        notes_payload = json.dumps(notes_dict)
 
         # 5. Guardar thesis_portfolio
         portfolio_id = save_thesis_portfolio(
@@ -187,14 +250,25 @@ def bootstrap_reviewed_portfolios(
         rate_3plus_list.append(metrics["rate_3plus"])
         unique_hits_union_list.append(metrics["unique_hits_union"])
         average_internal_overlaps.append(metrics["average_internal_overlap"])
+        high_redundancy_pairs_list.append(metrics["high_redundancy_pairs"])
 
     return {
         "success": True,
         "portfolios_created": portfolios_created,
         "draws_processed": draws_processed,
+        "skipped_draws": skipped_draws,
         "avg_max_hits": round(sum(all_max_hits) / portfolios_created, 2) if portfolios_created else 0.0,
         "rate_2plus": round(sum(rate_2plus_list) / portfolios_created, 2) if portfolios_created else 0.0,
         "rate_3plus": round(sum(rate_3plus_list) / portfolios_created, 2) if portfolios_created else 0.0,
         "unique_hits_union_avg": round(sum(unique_hits_union_list) / portfolios_created, 2) if portfolios_created else 0.0,
         "average_internal_overlap": round(sum(average_internal_overlaps) / portfolios_created, 2) if portfolios_created else 0.0,
+        "high_redundancy_pairs": round(sum(high_redundancy_pairs_list) / portfolios_created, 2) if portfolios_created else 0.0,
+        "seed": seed,
+        "pool_size": pool_size,
+        "top_k": top_k,
+        "from_draw": from_draw,
+        "to_draw": to_draw,
+        "use_optimizer": use_optimizer,
+        "use_feedback_profile": use_feedback_profile,
+        "mark_all_as_played": mark_all_as_played,
     }
