@@ -408,3 +408,26 @@ def bootstrap_feedback_cmd(
     )
     _json(res)
 
+
+@app.command("structural-signal-audit")
+def structural_signal_audit_cmd(
+    game: Annotated[str, typer.Option("--game")] = "revancha",
+    limit: Annotated[int, typer.Option("--limit")] = 100,
+    pool_size: Annotated[int, typer.Option("--pool-size")] = 1000,
+    top_k: Annotated[int, typer.Option("--top-k")] = 10,
+    seed: Annotated[int, typer.Option("--seed")] = 42,
+) -> None:
+    """Auditoria retrospectiva de senales estructurales."""
+    from .structural_signal_audit import run_structural_signal_audit
+
+    res = run_structural_signal_audit(
+        db_path=DEFAULT_DB_PATH,
+        game=game,
+        limit=limit,
+        pool_size=pool_size,
+        top_k=top_k,
+        seed=seed,
+    )
+    _json(res)
+
+
