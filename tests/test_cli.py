@@ -110,3 +110,64 @@ def test_workflow_loop_command_runs(tmp_path, monkeypatch):
     assert "evaluation" in result.output
 
 
+def test_backtest_cli_options(tmp_path, monkeypatch):
+    import melate_app_lab.cli as cli
+    from melate_app_lab.historical_store import import_draws_to_memory
+
+    db_path = tmp_path / "data" / "memory.sqlite"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(cli, "DEFAULT_DB_PATH", db_path)
+
+    dummy_history = []
+    for draw in range(1, 45):
+        dummy_history.append({
+            "draw": draw,
+            "numbers": [1, 2, 3, 4, 5, 6],
+            "sum": 21,
+            "sum_band": "low_band",
+            "block_signature": "6-0-0-0-0",
+            "block_presence_signature": "1-0-0-0-0",
+            "game": "revancha",
+            "date": "2026-05-29"
+        })
+    import_draws_to_memory(dummy_history, db_path)
+
+    import melate_app_lab.desktop_controller as controller
+    monkeypatch.setattr(controller, "open_report", lambda path: None)
+
+    called_args = {}
+    import melate_app_lab.backtest_lab as backtest_lab
+    def mock_run_backtest(*args, **kwargs):
+        called_args.update(kwargs)
+        return {
+            "game": kwargs.get("game"),
+            "draws_evaluated": 1,
+            "metrics": {},
+            "results": [],
+            "manifest": {"commit_sha": "dummy", "branch": "dummy"},
+        }
+    monkeypatch.setattr(backtest_lab, "run_backtest", mock_run_backtest)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "backtest",
+            "--limit", "5",
+            "--game", "revancha",
+            "--pool-size", "10",
+            "--use-optimizer",
+            "--use-feedback-profile",
+        ],
+    )
+    assert result.exit_code == 0
+    assert called_args["use_optimizer"] is True
+    assert called_args["use_feedback_profile"] is True
+    assert called_args["db_path"] == db_path
+
+    help_result = runner.invoke(app, ["backtest", "--help"])
+    assert help_result.exit_code == 0
+    assert "use-optimizer" in help_result.output
+    assert "use-feedback-prof" in help_result.output
+
+

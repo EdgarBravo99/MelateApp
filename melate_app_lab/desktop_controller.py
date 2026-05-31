@@ -481,6 +481,8 @@ def run_backtest_lab(
     top_k: int = 10,
     seed: int = 42,
     use_ml: bool = False,
+    use_optimizer: bool = False,
+    use_feedback_profile: bool = False,
     log_fn: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     from .historical_store import load_draw_history
@@ -509,6 +511,9 @@ def run_backtest_lab(
         seed=seed,
         game=game,
         use_ml=use_ml,
+        use_optimizer=use_optimizer,
+        use_feedback_profile=use_feedback_profile,
+        db_path=db_path,
         log_fn=log_fn,
     )
 

@@ -263,6 +263,8 @@ def backtest_cmd(
     pool_size: Annotated[int, typer.Option()] = 200,
     top_k: Annotated[int, typer.Option()] = 10,
     use_ml: Annotated[bool, typer.Option()] = False,
+    use_optimizer: Annotated[bool, typer.Option("--use-optimizer/--no-use-optimizer")] = False,
+    use_feedback_profile: Annotated[bool, typer.Option("--use-feedback-profile/--no-use-feedback-profile")] = False,
 ) -> None:
     from .desktop_controller import run_backtest_lab, open_report
 
@@ -274,6 +276,8 @@ def backtest_cmd(
         top_k=top_k,
         seed=seed,
         use_ml=use_ml,
+        use_optimizer=use_optimizer,
+        use_feedback_profile=use_feedback_profile,
     )
     _json(res)
     open_report(res["html_path"])
