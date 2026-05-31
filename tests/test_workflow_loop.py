@@ -154,3 +154,82 @@ def test_run_unified_workflow(tmp_path):
         
     assert res_eval["evaluation"]["portfolio_unique_hits_captured"] == len(union_hits)
     assert sorted(res_eval["evaluation"]["hit_numbers"]) == sorted(list(union_hits))
+
+
+def test_run_unified_workflow_with_structural_diversification(tmp_path):
+    db_path = tmp_path / "data" / "memory.sqlite"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Import minimal history
+    history_records = [
+        {"game": "revancha", "draw": 4210, "date": "2026-05-01", "numbers": [1, 2, 3, 4, 5, 6]},
+        {"game": "revancha", "draw": 4211, "date": "2026-05-02", "numbers": [11, 12, 13, 14, 15, 16]},
+        {"game": "revancha", "draw": 4212, "date": "2026-05-03", "numbers": [21, 22, 23, 24, 25, 26]}
+    ]
+    import_draws_to_memory(history_records, db_path=db_path)
+
+    # Run workflow loop with diversification
+    res = run_unified_workflow(
+        db_path=db_path,
+        draw=4213,
+        game="revancha",
+        pool_size=15,
+        seed=42,
+        use_structural_diversification=True,
+        structural_diversity_weight=1.2,
+    )
+
+    assert res["portfolio_id"] > 0
+    candidates = load_thesis_candidates(db_path, res["portfolio_id"])
+    assert len(candidates) == 10
+
+    # Verify notes field format contains structural JSON payload
+    import json
+    for cand in candidates:
+        notes_dict = json.loads(cand["notes"])
+        assert "structural_signal_score" in notes_dict
+        assert "selection_reason" in notes_dict
+        assert "gap_family" in notes_dict
+        assert "structural_notes" in notes_dict
+        assert isinstance(notes_dict["structural_signal_score"], float)
+        assert isinstance(notes_dict["selection_reason"], str)
+
+
+def test_run_unified_workflow_identical_when_flag_off(tmp_path):
+    db_path = tmp_path / "data" / "memory.sqlite"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    history_records = [
+        {"game": "revancha", "draw": 4210, "date": "2026-05-01", "numbers": [1, 2, 3, 4, 5, 6]},
+        {"game": "revancha", "draw": 4211, "date": "2026-05-02", "numbers": [11, 12, 13, 14, 15, 16]},
+        {"game": "revancha", "draw": 4212, "date": "2026-05-03", "numbers": [21, 22, 23, 24, 25, 26]}
+    ]
+    import_draws_to_memory(history_records, db_path=db_path)
+
+    # Flag explicitly off
+    res_off = run_unified_workflow(
+        db_path=db_path,
+        draw=4213,
+        game="revancha",
+        pool_size=15,
+        seed=100,
+        use_structural_diversification=False,
+    )
+
+    # Flag off by default
+    res_default = run_unified_workflow(
+        db_path=db_path,
+        draw=4213,
+        game="revancha",
+        pool_size=15,
+        seed=100,
+    )
+
+    cands_off = load_thesis_candidates(db_path, res_off["portfolio_id"])
+    cands_default = load_thesis_candidates(db_path, res_default["portfolio_id"])
+
+    assert len(cands_off) == len(cands_default)
+    for c_off, c_def in zip(cands_off, cands_default):
+        assert c_off["numbers"] == c_def["numbers"]
+        assert c_off["rank_score"] == pytest.approx(c_def["rank_score"])
+

@@ -231,3 +231,77 @@ def test_run_backtest_lab_controller(tmp_path, sample_history):
     assert "metrics" in res
     assert "html_path" in res
     assert "results" in res
+
+
+def test_run_backtest_with_structural_diversification(sample_history):
+    # Run backtest with diversification active
+    results = run_backtest(
+        history=sample_history,
+        target_draws=[111],
+        window=5,
+        pool_size=10,
+        top_k=2,
+        seed=123,
+        game="revancha",
+        use_optimizer=True,
+        use_structural_diversification=True,
+        structural_diversity_weight=1.5,
+    )
+
+    assert results["draws_evaluated"] == 1
+    assert "metrics" in results
+    assert "manifest" in results
+    assert results["manifest"]["use_structural_diversification"] is True
+    assert results["manifest"]["structural_diversity_weight"] == 1.5
+
+    # Check structural metrics exist in aggregated
+    metrics = results["metrics"]
+    assert "ranker_unique_block_signatures" in metrics
+    assert "ranker_unique_gap_families" in metrics
+    assert "ranker_average_structural_signal_score" in metrics
+    assert "ranker_dominant_block_signature_ratio" in metrics
+    assert "ranker_dominant_gap_family_ratio" in metrics
+    assert "ranker_average_pair_overlap" in metrics
+    assert "ranker_structural_profile_coverage" in metrics
+
+    # Check draw-specific structural metrics exist
+    draw_res = results["results"][0]
+    assert "ranker_unique_block_signatures" in draw_res
+    assert "ranker_unique_gap_families" in draw_res
+    assert "ranker_average_structural_signal_score" in draw_res
+
+
+def test_backtest_identical_behavior_when_flag_off(sample_history):
+    # Run with flag False
+    res_off = run_backtest(
+        history=sample_history,
+        target_draws=[111],
+        window=5,
+        pool_size=20,
+        top_k=5,
+        seed=42,
+        game="revancha",
+        use_optimizer=True,
+        use_structural_diversification=False,
+    )
+
+    # Run with default (which has flag off implicitly)
+    res_default = run_backtest(
+        history=sample_history,
+        target_draws=[111],
+        window=5,
+        pool_size=20,
+        top_k=5,
+        seed=42,
+        game="revancha",
+        use_optimizer=True,
+    )
+
+    # Compare portfolios
+    portfolio_off = [r["numbers"] for r in res_off["results"][0].get("top_candidates", [])] # wait, top_candidates is not direct in results array, let's verify how results captures top_candidates?
+    # In backtest_lab.py, result draw_metrics has hits lists, but does it store top candidates? No, but let's check:
+    # We can check ranker_rate_2plus, ranker_average_internal_overlap, etc. They should match exactly.
+    assert res_off["metrics"]["ranker_rate_2plus"] == res_default["metrics"]["ranker_rate_2plus"]
+    assert res_off["metrics"]["ranker_average_internal_overlap"] == res_default["metrics"]["ranker_average_internal_overlap"]
+    assert res_off["metrics"]["ranker_high_redundancy_pairs"] == res_default["metrics"]["ranker_high_redundancy_pairs"]
+

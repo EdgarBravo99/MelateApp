@@ -190,10 +190,20 @@ def review_all(
     game: Annotated[str, typer.Option()] = "revancha",
     notes: Annotated[str, typer.Option()] = None,
     draw: Annotated[int, typer.Option()] = None,
+    use_structural_diversification: Annotated[bool, typer.Option("--use-structural-diversification/--no-use-structural-diversification")] = False,
+    structural_diversity_weight: Annotated[float, typer.Option("--structural-diversity-weight")] = 1.0,
 ) -> None:
     from .desktop_controller import run_revision_completa
 
-    res = run_revision_completa(DEFAULT_DB_PATH, count=count, game=game, notes=notes, draw=draw)
+    res = run_revision_completa(
+        DEFAULT_DB_PATH,
+        count=count,
+        game=game,
+        notes=notes,
+        draw=draw,
+        use_structural_diversification=use_structural_diversification,
+        structural_diversity_weight=structural_diversity_weight,
+    )
     _json(res)
 
 
@@ -263,6 +273,8 @@ def backtest_cmd(
     pool_size: Annotated[int, typer.Option()] = 200,
     top_k: Annotated[int, typer.Option()] = 10,
     use_ml: Annotated[bool, typer.Option()] = False,
+    use_structural_diversification: Annotated[bool, typer.Option("--use-structural-diversification/--no-use-structural-diversification")] = False,
+    structural_diversity_weight: Annotated[float, typer.Option("--structural-diversity-weight")] = 1.0,
     use_optimizer: Annotated[bool, typer.Option("--use-optimizer/--no-use-optimizer")] = False,
     use_feedback_profile: Annotated[bool, typer.Option("--use-feedback-profile/--no-use-feedback-profile")] = False,
 ) -> None:
@@ -276,6 +288,8 @@ def backtest_cmd(
         top_k=top_k,
         seed=seed,
         use_ml=use_ml,
+        use_structural_diversification=use_structural_diversification,
+        structural_diversity_weight=structural_diversity_weight,
         use_optimizer=use_optimizer,
         use_feedback_profile=use_feedback_profile,
     )
@@ -291,6 +305,8 @@ def workflow_loop(
     seed: Annotated[int, typer.Option()] = 42,
     played: Annotated[str | None, typer.Option()] = None,
     result: Annotated[str | None, typer.Option()] = None,
+    use_structural_diversification: Annotated[bool, typer.Option("--use-structural-diversification/--no-use-structural-diversification")] = False,
+    structural_diversity_weight: Annotated[float, typer.Option("--structural-diversity-weight")] = 1.0,
 ) -> None:
     from .workflow_loop import run_unified_workflow
 
@@ -310,6 +326,8 @@ def workflow_loop(
         seed=seed,
         played_indices=played_indices,
         result_numbers=result_numbers,
+        use_structural_diversification=use_structural_diversification,
+        structural_diversity_weight=structural_diversity_weight,
     )
     _json(res)
 
@@ -393,6 +411,8 @@ def bootstrap_feedback_cmd(
     use_feedback_profile: Annotated[bool, typer.Option("--use-feedback-profile/--no-use-feedback-profile")] = False,
     use_optimizer: Annotated[bool, typer.Option("--use-optimizer/--no-use-optimizer")] = True,
     skip_existing: Annotated[bool, typer.Option("--skip-existing/--no-skip-existing")] = True,
+    use_structural_diversification: Annotated[bool, typer.Option("--use-structural-diversification/--no-use-structural-diversification")] = False,
+    structural_diversity_weight: Annotated[float, typer.Option("--structural-diversity-weight")] = 1.0,
 ) -> None:
     """Bootstrap de carteras revisadas históricas retrospectivas."""
     from .feedback_bootstrap import bootstrap_reviewed_portfolios
@@ -409,6 +429,31 @@ def bootstrap_feedback_cmd(
         use_feedback_profile=use_feedback_profile,
         use_optimizer=use_optimizer,
         skip_existing=skip_existing,
+        use_structural_diversification=use_structural_diversification,
+        structural_diversity_weight=structural_diversity_weight,
     )
     _json(res)
+
+
+@app.command("structural-signal-audit")
+def structural_signal_audit_cmd(
+    game: Annotated[str, typer.Option("--game")] = "revancha",
+    limit: Annotated[int, typer.Option("--limit")] = 100,
+    pool_size: Annotated[int, typer.Option("--pool-size")] = 1000,
+    top_k: Annotated[int, typer.Option("--top-k")] = 10,
+    seed: Annotated[int, typer.Option("--seed")] = 42,
+) -> None:
+    """Auditoria retrospectiva de senales estructurales."""
+    from .structural_signal_audit import run_structural_signal_audit
+
+    res = run_structural_signal_audit(
+        db_path=DEFAULT_DB_PATH,
+        game=game,
+        limit=limit,
+        pool_size=pool_size,
+        top_k=top_k,
+        seed=seed,
+    )
+    _json(res)
+
 

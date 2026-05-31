@@ -14,6 +14,7 @@ from .ml_ranker import is_ml_available, train_ml_ranker, rank_candidates_ml
 from .experiment_registry import build_manifest
 from .thesis_memory import save_experiment_run
 from .metrics import rate_2plus, unique_hits_union, average_internal_overlap, high_redundancy_pairs
+from .portfolio_optimizer import calculate_portfolio_structural_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,8 @@ def run_backtest(
     use_feedback_profile: bool = False,
     db_path: str | Path | None = None,
     log_fn: Callable[[str], None] | None = None,
+    use_structural_diversification: bool = False,
+    structural_diversity_weight: float = 1.0,
 ) -> dict[str, Any]:
     """Execute a walk-forward retrospective evaluation of candidates against historical draws.
 
@@ -107,7 +110,12 @@ def run_backtest(
 
         baseline_features = extract_features_batch(baseline_pool, train_history, prior_history, graph_data)
 
-        # 3. Ranking
+        # 2.5 Compute structural signals if active
+        if use_structural_diversification:
+            from .structural_signal_engine import compute_structural_signals_batch
+            cand_features = compute_structural_signals_batch(cand_features, prior_history, window=window)
+            baseline_features = compute_structural_signals_batch(baseline_features, prior_history, window=window)
+
         # 3. Ranking
         common_sigs = analysis.get("common_signatures", [])
         common_bands = analysis.get("common_bands", [])
@@ -134,8 +142,18 @@ def run_backtest(
         # 4. Score & Hits Evaluation
         if use_optimizer:
             from .portfolio_optimizer import optimize_portfolio
-            top_candidates = optimize_portfolio(ranked_candidates, top_k)
-            top_baseline = optimize_portfolio(ranked_baseline, top_k)
+            top_candidates = optimize_portfolio(
+                ranked_candidates,
+                top_k,
+                use_structural_diversification=use_structural_diversification,
+                structural_diversity_weight=structural_diversity_weight,
+            )
+            top_baseline = optimize_portfolio(
+                ranked_baseline,
+                top_k,
+                use_structural_diversification=use_structural_diversification,
+                structural_diversity_weight=structural_diversity_weight,
+            )
         else:
             top_candidates = ranked_candidates[:top_k]
             top_baseline = ranked_baseline[:top_k]
@@ -145,6 +163,10 @@ def run_backtest(
 
         all_cand_hits = [len(set(c["numbers"]) & target_set) for c in ranked_candidates]
         all_base_hits = [len(set(b["numbers"]) & target_set) for b in ranked_baseline]
+
+        # Calculate structural metrics
+        cand_struct = calculate_portfolio_structural_metrics(top_candidates)
+        base_struct = calculate_portfolio_structural_metrics(top_baseline)
 
         # Count distribution
         def get_dist(hits_list: list[int]) -> dict[str, int]:
@@ -171,6 +193,23 @@ def run_backtest(
             "baseline_average_internal_overlap": average_internal_overlap([b["numbers"] for b in top_baseline]),
             "ranker_high_redundancy_pairs": high_redundancy_pairs([c["numbers"] for c in top_candidates]),
             "baseline_high_redundancy_pairs": high_redundancy_pairs([b["numbers"] for b in top_baseline]),
+            
+            # Structural metrics
+            "ranker_unique_block_signatures": cand_struct["unique_block_signatures"],
+            "ranker_unique_gap_families": cand_struct["unique_gap_families"],
+            "ranker_average_structural_signal_score": cand_struct["average_structural_signal_score"],
+            "ranker_dominant_block_signature_ratio": cand_struct["dominant_block_signature_ratio"],
+            "ranker_dominant_gap_family_ratio": cand_struct["dominant_gap_family_ratio"],
+            "ranker_average_pair_overlap": cand_struct["average_pair_overlap"],
+            "ranker_structural_profile_coverage": cand_struct["structural_profile_coverage"],
+            
+            "baseline_unique_block_signatures": base_struct["unique_block_signatures"],
+            "baseline_unique_gap_families": base_struct["unique_gap_families"],
+            "baseline_average_structural_signal_score": base_struct["average_structural_signal_score"],
+            "baseline_dominant_block_signature_ratio": base_struct["dominant_block_signature_ratio"],
+            "baseline_dominant_gap_family_ratio": base_struct["dominant_gap_family_ratio"],
+            "baseline_average_pair_overlap": base_struct["average_pair_overlap"],
+            "baseline_structural_profile_coverage": base_struct["structural_profile_coverage"],
         }
         results.append(draw_metrics)
 
@@ -213,6 +252,23 @@ def run_backtest(
         "baseline_average_internal_overlap": round(sum(r["baseline_average_internal_overlap"] for r in results) / draws_count, 2),
         "ranker_high_redundancy_pairs": round(sum(r["ranker_high_redundancy_pairs"] for r in results) / draws_count, 2),
         "baseline_high_redundancy_pairs": round(sum(r["baseline_high_redundancy_pairs"] for r in results) / draws_count, 2),
+        
+        # Structural aggregated metrics
+        "ranker_unique_block_signatures": round(sum(r["ranker_unique_block_signatures"] for r in results) / draws_count, 2),
+        "ranker_unique_gap_families": round(sum(r["ranker_unique_gap_families"] for r in results) / draws_count, 2),
+        "ranker_average_structural_signal_score": round(sum(r["ranker_average_structural_signal_score"] for r in results) / draws_count, 4),
+        "ranker_dominant_block_signature_ratio": round(sum(r["ranker_dominant_block_signature_ratio"] for r in results) / draws_count, 4),
+        "ranker_dominant_gap_family_ratio": round(sum(r["ranker_dominant_gap_family_ratio"] for r in results) / draws_count, 4),
+        "ranker_average_pair_overlap": round(sum(r["ranker_average_pair_overlap"] for r in results) / draws_count, 4),
+        "ranker_structural_profile_coverage": round(sum(r["ranker_structural_profile_coverage"] for r in results) / draws_count, 4),
+        
+        "baseline_unique_block_signatures": round(sum(r["baseline_unique_block_signatures"] for r in results) / draws_count, 2),
+        "baseline_unique_gap_families": round(sum(r["baseline_unique_gap_families"] for r in results) / draws_count, 2),
+        "baseline_average_structural_signal_score": round(sum(r["baseline_average_structural_signal_score"] for r in results) / draws_count, 4),
+        "baseline_dominant_block_signature_ratio": round(sum(r["baseline_dominant_block_signature_ratio"] for r in results) / draws_count, 4),
+        "baseline_dominant_gap_family_ratio": round(sum(r["baseline_dominant_gap_family_ratio"] for r in results) / draws_count, 4),
+        "baseline_average_pair_overlap": round(sum(r["baseline_average_pair_overlap"] for r in results) / draws_count, 4),
+        "baseline_structural_profile_coverage": round(sum(r["baseline_structural_profile_coverage"] for r in results) / draws_count, 4),
     }
 
     manifest = build_manifest(
@@ -226,6 +282,10 @@ def run_backtest(
         use_optimizer=use_optimizer,
         use_feedback_profile=use_feedback_profile,
     )
+    
+    # Register the flags in the manifest
+    manifest["use_structural_diversification"] = use_structural_diversification
+    manifest["structural_diversity_weight"] = structural_diversity_weight
 
     if db_path:
         save_experiment_run(
@@ -245,3 +305,4 @@ def run_backtest(
         "results": results,
         "manifest": manifest,
     }
+
