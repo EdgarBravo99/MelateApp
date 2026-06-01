@@ -4,7 +4,7 @@ import os
 import re
 import webbrowser
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .draw_trace import trace_draw
 from .evaluator_brain import brain_review
@@ -16,6 +16,7 @@ from .montecarlo_stress import stress_review
 from .number_utils import parse_numbers
 from .postmortem import postmortem_review
 from .report_writer import write_csv_summary, write_html_report, write_json_report
+from . import manual_verifier
 
 
 def _ensure_db_parent(db_path: str | Path) -> None:
@@ -644,6 +645,250 @@ def load_active_profile_info(
         "active": profile["active"],
         "created_at": profile["created_at"],
     })
+
+
+def run_internal_portfolio_checks(portfolio: list[dict[str, Any]]) -> dict[str, Any]:
+    from .metrics import average_internal_overlap, high_redundancy_pairs
+    if not portfolio:
+        return {
+            "status": "review",
+            "average_internal_overlap": 0.0,
+            "high_redundancy_pairs": 0,
+            "unique_block_signatures": 0,
+            "unique_gap_families": 0,
+            "average_rank_score": 0.0,
+            "average_structural_signal_score": 0.0,
+            "message": "Cartera vacía."
+        }
+    
+    nums_only = [c["numbers"] for c in portfolio]
+    avg_overlap = average_internal_overlap(nums_only)
+    high_red = high_redundancy_pairs(nums_only)
+    
+    avg_rank = sum(c.get("rank_score", 0.0) for c in portfolio) / len(portfolio)
+    
+    # Check if structural signals exist (could be nested in 'structural' or keys are structural_signal_score)
+    struct_scores = []
+    for c in portfolio:
+        if "structural" in c and isinstance(c["structural"], dict):
+            struct_scores.append(c["structural"].get("structural_signal_score", 0.0))
+        else:
+            struct_scores.append(c.get("structural_signal_score", 0.0))
+            
+    avg_struct = sum(struct_scores) / len(portfolio) if struct_scores else 0.0
+    
+    unique_sigs = len({c.get("block_signature", "") for c in portfolio if c.get("block_signature")})
+    unique_gaps = len({c.get("gap_family", "") for c in portfolio if c.get("gap_family")})
+    
+    # Decide status
+    if avg_overlap > 2.8 or high_red > 4:
+        status = "atypical"
+        msg = "Alta redundancia en la cartera (solapamiento > 2.8 o parejas muy redundantes)."
+    elif avg_overlap > 2.3 or high_red >= 2:
+        status = "review"
+        msg = "Redundancia moderada detectada. Se recomienda revisión de parámetros."
+    else:
+        status = "stable"
+        msg = "Cartera estable. Niveles de redundancia y dispersión dentro de rangos normales."
+        
+    return {
+        "status": status,
+        "average_internal_overlap": round(avg_overlap, 4),
+        "high_redundancy_pairs": high_red,
+        "unique_block_signatures": unique_sigs,
+        "unique_gap_families": unique_gaps,
+        "average_rank_score": round(avg_rank, 4),
+        "average_structural_signal_score": round(avg_struct, 4),
+        "message": msg
+    }
+
+
+def generate_automatic_review(
+    db_path: str | Path = DEFAULT_DB_PATH,
+    game: str = "revancha",
+    draw: int | None = None,
+    count: int = 10,
+    pool_size: int = 1000,
+    seed: int = 42,
+    use_structural_diversification: bool = True,
+    structural_diversity_weight: float = 1.0,
+    include_statistical_crosscheck: bool = True,
+    use_optimizer: bool = True,
+    use_feedback_profile: bool = False,
+    use_ml: bool = False,
+    ml_model: str | None = None,
+    auto_save: bool = False,
+    notes: str | None = None,
+) -> dict[str, Any]:
+    import json
+    from .historical_store import load_draw_history, suggest_next_draw
+    from .candidate_generator import analyze_time_window
+    from .candidate_search import search_candidates
+    from .feature_extractor import extract_features
+    from .relation_graph import build_historical_relation_graph
+    from .candidate_ranker import rank_candidates
+    from .structural_signal_engine import compute_structural_signals_batch
+    from .statistical_crosscheck import (
+        analyze_candidate_statistical_profile,
+        analyze_portfolio_statistical_profile,
+    )
+    from .thesis_memory import save_thesis_portfolio
+
+    _ensure_db_parent(db_path)
+    history = load_draw_history(db_path)
+    if not history:
+        return {
+            "success": False,
+            "errors": ["El historial en la base de datos está vacío."],
+        }
+
+    target_draw = draw if draw is not None else suggest_next_draw(db_path)
+    prior_history = [d for d in history if d["draw"] < target_draw]
+    if not prior_history:
+        prior_history = history
+
+    # 1. Analyze window & build graph
+    analysis = analyze_time_window(prior_history, window=30)
+    graph_data = build_historical_relation_graph(prior_history, window=30, game=game)
+
+    # 2. Generate Candidate Pool
+    effective_pool_size = max(pool_size, count * 2)
+    candidate_pool = search_candidates(analysis, pool_size=effective_pool_size, seed=seed)
+
+    # 3. Extract Features
+    cand_features = []
+    train_history = prior_history[-30:] if len(prior_history) >= 30 else prior_history
+    for cand in candidate_pool:
+        feats = extract_features(cand, train_history, prior_history, graph_data)
+        cand_features.append(feats)
+
+    # 4. Rank Candidates
+    common_sigs = analysis.get("common_signatures", [])
+    common_bands = analysis.get("common_bands", [])
+
+    # Load feedback weights if active
+    weights = None
+    if use_feedback_profile:
+        from .thesis_memory import get_active_feedback_profile
+        active_profile = get_active_feedback_profile(db_path, game)
+        if active_profile:
+            weights = active_profile["weights"]
+
+    ranked = rank_candidates(cand_features, common_sigs, common_bands, weights=weights)
+
+    # 5. ML Scoring if active
+    if use_ml:
+        from .ml_ranker import is_ml_available, train_ml_ranker, rank_candidates_ml
+        if is_ml_available():
+            prior_draw_ids = [d["draw"] for d in prior_history]
+            ml_train_draws = prior_draw_ids[-30:] if len(prior_draw_ids) >= 30 else prior_draw_ids
+            model = train_ml_ranker(history, ml_train_draws, window=30, game=game)
+            ml_res = rank_candidates_ml(model, ranked, common_sigs, common_bands)
+            if ml_res:
+                ranked = ml_res
+
+    # 6. Compute Structural Signals
+    ranked = compute_structural_signals_batch(ranked, prior_history, window=30, gap_window=50, max_lag=5)
+
+    # 7. Select Portfolio (Optimizer / Top-k)
+    if use_optimizer:
+        from .portfolio_optimizer import optimize_portfolio
+        final_portfolio = optimize_portfolio(
+            ranked,
+            count,
+            use_structural_diversification=use_structural_diversification,
+            structural_diversity_weight=structural_diversity_weight,
+        )
+    else:
+        final_portfolio = ranked[:count]
+
+    # Assign Letter Labels & Extract Statistical Profiles
+    for idx, c in enumerate(final_portfolio):
+        c["letter"] = chr(ord('A') + idx)
+        if include_statistical_crosscheck:
+            c["statistical_crosscheck"] = analyze_candidate_statistical_profile(c["numbers"], prior_history)
+        else:
+            c["statistical_crosscheck"] = {}
+
+    # 8. Run Portfolio statistical check & internal checks
+    port_stat_prof = {}
+    if include_statistical_crosscheck:
+        port_stat_prof = analyze_portfolio_statistical_profile(final_portfolio, prior_history)
+
+    internal_checks = run_internal_portfolio_checks(final_portfolio)
+
+    portfolio_id = None
+    if auto_save:
+        # Build candidate payloads for DB
+        db_candidates = []
+        for idx, c in enumerate(final_portfolio):
+            c_notes = {
+                "label": c["letter"],
+                "rank_score": round(c.get("rank_score", 0.0), 4),
+                "selection_reason": c.get("selection_reason", "Selección automática del cockpit"),
+                "source": "automatic_review",
+                "structural": {
+                    "structural_signal_score": round(c.get("structural_signal_score", 0.0), 4),
+                    "pair_lag_score": round(c.get("pair_lag_score", 0.0), 4),
+                    "block_activity_score": round(c.get("block_activity_score", 0.0), 4),
+                    "gap_echo_score": round(c.get("gap_echo_score", 0.0), 4),
+                    "block_signature": c.get("block_signature", ""),
+                    "gap_family": c.get("gap_family", ""),
+                },
+                "statistical_crosscheck": c.get("statistical_crosscheck", {}),
+            }
+            from .workflow_loop import classify_candidate
+            strat = classify_candidate(c)
+            db_candidates.append({
+                "numbers": c["numbers"],
+                "classification": strat,
+                "graph_support_score": c.get("graph_support_score", 0.0),
+                "sum": c.get("sum", sum(c["numbers"])),
+                "sum_band": c.get("sum_band", "mid_band"),
+                "block_signature": c.get("block_signature", ""),
+                "rank_score": c.get("rank_score"),
+                "pair_edges": c.get("pair_edges", []),
+                "evidence_draws": c.get("evidence_draws", []),
+                "notes": json.dumps(c_notes, ensure_ascii=False),
+            })
+
+        portfolio_notes = {
+            "source": "automatic_review",
+            "user_notes": notes or "",
+            "config": {
+                "game": game,
+                "draw": target_draw,
+                "seed": seed,
+                "pool_size": pool_size,
+                "use_structural_diversification": use_structural_diversification,
+                "structural_diversity_weight": structural_diversity_weight,
+                "use_optimizer": use_optimizer,
+                "use_feedback_profile": use_feedback_profile,
+                "use_ml": use_ml,
+            },
+            "metrics": internal_checks,
+            "portfolio_statistical_profile": port_stat_prof,
+        }
+
+        portfolio_id = save_thesis_portfolio(
+            db_path=db_path,
+            draw=target_draw,
+            game=game,
+            candidates=db_candidates,
+            notes=json.dumps(portfolio_notes, ensure_ascii=False),
+        )
+
+    return {
+        "success": True,
+        "portfolio_id": portfolio_id,
+        "final_portfolio": final_portfolio,
+        "internal_checks": internal_checks,
+        "portfolio_statistical_profile": port_stat_prof,
+        "next_draw": target_draw,
+        "history_count": len(history),
+        "game": game,
+        "notes": notes,
+    }
 
 
 
